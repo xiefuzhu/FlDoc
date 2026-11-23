@@ -35,6 +35,8 @@ flDoc 是一款面向 Windows 10/11 的桌面悬浮离线文档阅读器：由 A
 
 ## 构建与打包
 
+GitHub Actions 使用 Flutter 3.50.1 和 Dart 3.14.0。
+
 ```powershell
 # 静态检查与测试
 flutter analyze
@@ -43,9 +45,15 @@ flutter test
 # 构建 Windows Release（自动将 third_party/ripgrep/rg.exe 复制到 exe 同目录）
 flutter build windows --release
 
-# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.0.exe）
-iscc installer\flDoc.iss
+# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.3.exe）
+iscc /DAppVersion=0.1.3 installer\flDoc.iss
 ```
+
+### GitHub Actions 发布
+
+推送到 `main`、向 `main` 发起 PR，或手动运行 Windows CI and Release，会执行静态分析、测试、Windows x64 构建和打包。每次成功运行都可在 Actions 中下载安装包及 `SHA256SUMS.txt`。
+
+发布时先更新 `pubspec.yaml` 的版本、应用内版本显示和安装脚本的默认版本，再提交并推送 `vX.Y.Z` 标签。标签必须与 `pubspec.yaml` 中 `+` 前的版本一致。检查和打包通过后，工作流会自动在 GitHub Releases 发布安装包和 SHA-256 校验文件。
 
 ## 设计文档
 

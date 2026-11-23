@@ -1,0 +1,116 @@
+name: Windows CI and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    name: Check and build Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check version
+        id: version
+        shell: pwsh
+        run: |
+          $match = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$'
+          if (-not $match) { throw 'Expected version: X.Y.Z+BUILD in pubspec.yaml' }
+          $version = $match.Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match pubspec version v$version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: '3.50.1'
+          cache: true
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze Dart code
+        run: flutter analyze --no-pub
+
+      - name: Run Flutter tests
+        run: flutter test --no-pub
+
+      - name: Build Windows x64
+        run: flutter build windows --release --no-pub
+
+      - name: Package and checksum the installer
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $bundleDir = 'build/windows/x64/runner/Release'
+          $required = @(
+            'fldoc.exe', 'flutter_windows.dll', 'sqlite3.dll', 'rg.exe',
+            'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
+            'data/app.so', 'data/flutter_assets/AssetManifest.bin'
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path (Join-Path $bundleDir $file) -PathType Leaf)) {
+              throw "Missing Windows build output: $file"
+            }
+          }
+
+          $iscc = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
+          & $iscc "/DAppVersion=$env:APP_VERSION" installer/flDoc.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $installer = Get-Item "build/installer/flDoc-Setup-$env:APP_VERSION.exe"
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $installer.DirectoryName 'SHA256SUMS.txt'), "$hash  $($installer.Name)`n")
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: flDoc-windows-x64
+          path: |
+            build/installer/flDoc-Setup-${{ steps.version.outputs.version }}.exe
+            build/installer/SHA256SUMS.txt
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: flDoc-windows-x64
+          path: release
+
+      - name: Verify and publish the installer
+        shell: bash
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          sha256sum --check SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" "flDoc-Setup-${GITHUB_REF_NAME#v}.exe" SHA256SUMS.txt \
+            --verify-tag --title "flDoc $GITHUB_REF_NAME" --generate-notes

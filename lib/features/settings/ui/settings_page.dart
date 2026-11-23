@@ -615,7 +615,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _SectionTitle('关于 flDoc'),
-        const _SettingTile(title: 'flDoc', subtitle: 'Windows 桌面悬浮离线文档阅读器 · 版本 0.1.0'),
+        const _SettingTile(title: 'flDoc', subtitle: 'Windows 桌面悬浮离线文档阅读器 · 版本 0.1.3'),
         _SettingTile(
           title: 'ripgrep (rg)',
           subtitle: _rgVersion ?? '未检测到（请检查内置 rg.exe 或搜索设置中的路径）',
