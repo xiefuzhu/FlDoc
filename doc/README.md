@@ -56,5 +56,5 @@ flDoc 是一个 Windows 桌面悬浮文档阅读器：由 AI agent 预先把教�
 
 ## 环境基线
 
-- Flutter 3.47.7 stable / Dart 3.13.5（2026-11-22 在本机检测）
+- Flutter 3.50.1 stable / Dart 3.14.0（GitHub Actions）
 - 目标平台：Windows 10 1809+ / Windows 11（Mica 仅 Win11 生效，Win10 退化为纯色背景）
