@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="72" viewBox="0 0 320 72">
+  <rect x="4" y="12" width="88" height="48" rx="8" fill="#0078D4" fill-opacity="0.16" stroke="#0078D4" stroke-width="2"/>
+  <text x="48" y="41" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" fill="#0078D4">Widget</text>
+  <line x1="92" y1="36" x2="116" y2="36" stroke="#0078D4" stroke-width="2"/>
+  <rect x="116" y="12" width="88" height="48" rx="8" fill="#0078D4" fill-opacity="0.16" stroke="#0078D4" stroke-width="2"/>
+  <text x="160" y="41" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" fill="#0078D4">Provider</text>
+  <line x1="204" y1="36" x2="228" y2="36" stroke="#0078D4" stroke-width="2"/>
+  <rect x="228" y="12" width="88" height="48" rx="8" fill="#107C10" fill-opacity="0.16" stroke="#107C10" stroke-width="2"/>
+  <text x="272" y="41" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" fill="#107C10">Cache</text>
+</svg>

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' data: blob:; connect-src 'none';">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  #stage { position: absolute; left: 0; top: 0; }
+</style>
+<script src="mermaid.min.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+(function() {
+  let seq = 0;
+  function post(obj) {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(JSON.stringify(obj));
+    }
+  }
+
+  async function renderMermaid(req) {
+    const id = req.id;
+    try {
+      if (typeof mermaid === 'undefined') {
+        post({ id, error: 'mermaid.min.js 未加载' });
+        return;
+      }
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: req.dark ? 'dark' : 'default',
+        fontFamily: 'Microsoft YaHei UI, Segoe UI, sans-serif'
+      });
+      const stage = document.getElementById('stage');
+      stage.innerHTML = '';
+      const uid = 'mmd_' + (++seq);
+      const out = await mermaid.render(uid, req.source);
+      stage.innerHTML = out.svg;
+      const svgEl = stage.querySelector('svg');
+      if (!svgEl) {
+        post({ id, error: '未生成 SVG' });
+        return;
+      }
+      // Measure rendered dimensions
+      const rect = svgEl.getBoundingClientRect();
+      let w = Math.ceil(rect.width || parseFloat(svgEl.getAttribute('width')) || 600);
+      let h = Math.ceil(rect.height || parseFloat(svgEl.getAttribute('height')) || 300);
+      if (w < 10) w = 600;
+      if (h < 10) h = 300;
+      svgEl.setAttribute('width', w);
+      svgEl.setAttribute('height', h);
+      if (!svgEl.getAttribute('xmlns')) {
+        svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      }
+      const xml = new XMLSerializer().serializeToString(svgEl);
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = w * scale;
+      canvas.height = h * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+
+      const img = new Image();
+      img.onload = function() {
+        try {
+          ctx.drawImage(img, 0, 0, w, h);
+          const png = canvas.toDataURL('image/png');
+          post({ id, png: png.replace(/^data:image\/png;base64,/, ''), width: w, height: h });
+        } catch (err) {
+          // Canvas tainted fallback: send SVG instead
+          post({ id, svg: xml, width: w, height: h });
+        }
+      };
+      img.onerror = function() {
+        post({ id, svg: xml, width: w, height: h });
+      };
+      const encoded = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+      img.src = encoded;
+    } catch (e) {
+      post({ id, error: (e && e.message) ? String(e.message) : String(e) });
+    }
+  }
+
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.addEventListener('message', function(ev) {
+      try {
+        const msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+        if (msg && msg.type === 'render') {
+          renderMermaid(msg);
+        }
+      } catch (e) {
+        post({ id: '', error: String(e) });
+      }
+    });
+    post({ type: 'ready', hasMermaid: typeof mermaid !== 'undefined' });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "schema": "fldoc.symbols/1",
+  "symbols": [
+    {
+      "name": "watch",
+      "qualifiedName": "Ref.watch",
+      "kind": "method",
+      "signature": "T watch<T>(ProviderListenable<T> provider)",
+      "page": "pages/concepts/reading.md",
+      "anchor": "using-refwatch",
+      "summary": "监听 provider，值变化时自动重建",
+      "aliases": ["ref.watch"]
+    },
+    {
+      "name": "ProviderScope",
+      "qualifiedName": "ProviderScope",
+      "kind": "widget",
+      "signature": "const ProviderScope({List<Override> overrides, required Widget child})",
+      "page": "pages/concepts/reading.md",
+      "anchor": "provider-scope-overrides",
+      "summary": "存储所有 Provider 状态的根容器组件",
+      "aliases": ["ProviderScope.overrides"]
+    }
+  ]
+}

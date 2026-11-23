@@ -1,0 +1,46 @@
+{
+  "schema": "fldoc.library/1",
+  "id": "sample-riverpod",
+  "name": "Riverpod",
+  "description": "Flutter/Dart 响应式缓存与状态管理框架（样例契约库）",
+  "homepage": "https://riverpod.dev",
+  "sourceLanguage": "en",
+  "displayLanguage": "zh-CN",
+  "defaultVersion": "3.x",
+  "updatedAt": "2026-11-22T16:00:00+08:00",
+  "generator": "agent:fldoc-fixture",
+  "versions": [
+    {
+      "id": "3.x",
+      "label": "3.x（最新）",
+      "dir": "3.x",
+      "sourceUrl": "https://riverpod.dev/docs/introduction/getting_started",
+      "scope": "https://riverpod.dev/docs/",
+      "crawledAt": "2026-11-22T15:40:00+08:00",
+      "pageCount": 2,
+      "translated": true,
+      "toc": [
+        { "title": "快速开始", "page": "pages/index.md" },
+        {
+          "title": "核心概念",
+          "children": [
+            { "title": "读取 Provider", "page": "pages/concepts/reading.md" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2.x",
+      "label": "2.x",
+      "dir": "2.x",
+      "sourceUrl": "https://riverpod.dev/v2/docs/",
+      "scope": "https://riverpod.dev/v2/docs/",
+      "crawledAt": "2025-10-01T12:00:00+08:00",
+      "pageCount": 1,
+      "translated": false,
+      "toc": [
+        { "title": "快速开始 (2.x)", "page": "pages/index.md" }
+      ]
+    }
+  ]
+}

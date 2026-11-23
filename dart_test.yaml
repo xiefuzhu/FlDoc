@@ -1,0 +1,4 @@
+timeout: 30s
+tags:
+  perf:
+    skip: "Run manually via dart run test/perf/generate_perf_library.dart"

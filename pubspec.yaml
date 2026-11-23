@@ -1,0 +1,46 @@
+name: fldoc
+description: "flDoc - Windows floating offline Markdown documentation reader with AI search & RAG."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  crypto: ^3.0.8
+  ffi: ^2.2.0
+  file_picker: ^11.0.3
+  fluent_ui: ^4.17.0
+  flutter:
+    sdk: flutter
+  flutter_math_fork: ^0.7.4
+  flutter_riverpod: ^3.5.0
+  flutter_svg: ^2.5.0
+  http: ^1.6.0
+  launch_at_startup: ^0.5.1
+  lpinyin: ^2.0.3
+  markdown: ^7.3.1
+  nativeapi: ^0.5.10
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  re_highlight: ^0.0.3
+  scrollable_positioned_list: ^0.3.8
+  sqlite3: ^3.9.1
+  tray_manager: ^0.8.3
+  url_launcher: ^6.3.3
+  webview_windows: ^0.4.0
+  win32: ^5.15.0
+  window_manager: ^0.6.0
+  yaml: ^3.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
+    - assets/prompts/
+    - assets/mermaid/
