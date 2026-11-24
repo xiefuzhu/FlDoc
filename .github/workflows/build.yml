@@ -91,7 +91,7 @@ jobs:
           overwrite: true
 
   android:
-    name: Build Android APK
+    name: Build Android APK (arm64-v8a)
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -114,21 +114,37 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
 
-      - name: Build Android release APK
-        run: flutter build apk --release --no-pub
+      - name: Build Android release APK (arm64-v8a)
+        run: flutter build apk --release --target-platform android-arm64 --no-pub
+
+      - name: Verify Android APK architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          abis=$(unzip -Z1 "$apk" 'lib/*' | cut -d/ -f2 | sort -u)
+          echo "Android APK ABIs: $abis"
+          if [ "$abis" != "arm64-v8a" ]; then
+            echo "Expected only arm64-v8a in APK, got: $abis" >&2
+            exit 1
+          fi
 
       - name: Upload Android APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: flDoc-android
+          name: flDoc-android-arm64-v8a
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           overwrite: true
 
   macos:
-    name: Build macOS universal app
+    name: Build macOS app (${{ matrix.arch }})
     runs-on: macos-26
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -143,21 +159,76 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
 
-      - name: Build macOS release app
+      - name: Build macOS release app (${{ matrix.arch }})
+        env:
+          FLUTTER_XCODE_ARCHS: ${{ matrix.arch }}
+          FLUTTER_XCODE_ONLY_ACTIVE_ARCH: 'NO'
         run: flutter build macos --release --no-pub
 
-      - name: Verify architectures and archive the app
+      - name: Verify architecture and archive the app
         shell: bash
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
         run: |
+          set -euo pipefail
           app=build/macos/Build/Products/Release/flDoc.app
-          lipo "$app/Contents/MacOS/flDoc" -verify_arch arm64 x86_64
-          ditto -c -k --sequesterRsrc --keepParent "$app" build/flDoc-macos-universal.zip
+          main_archs=$(lipo -archs "$app/Contents/MacOS/flDoc" | xargs)
+          if [ "$main_archs" != "$TARGET_ARCH" ]; then
+            echo "Expected main binary arch '$TARGET_ARCH', got '$main_archs'" >&2
+            exit 1
+          fi
+
+          # Ensure every Mach-O binary inside the app bundle is single-arch.
+          resigned=0
+          while IFS= read -r -d '' bin; do
+            kind=$(file -b "$bin")
+            if [[ "$kind" == Mach-O* ]]; then
+              archs=$(lipo -archs "$bin" | xargs)
+              if [ "$archs" != "$TARGET_ARCH" ]; then
+                if lipo "$bin" -verify_arch "$TARGET_ARCH"; then
+                  echo "Thinning $bin ($archs -> $TARGET_ARCH)"
+                  lipo "$bin" -thin "$TARGET_ARCH" -output "$bin.thin"
+                  mv "$bin.thin" "$bin"
+                  target="$bin"
+                  case "$bin" in
+                    *.framework/*)
+                      target="${bin%%.framework/*}.framework"
+                      ;;
+                  esac
+                  codesign --force --sign - "$target"
+                  resigned=1
+                else
+                  echo "Binary $bin has archs '$archs', missing '$TARGET_ARCH'" >&2
+                  exit 1
+                fi
+              fi
+            fi
+          done < <(find "$app" -type f -print0)
+
+          if [ "$resigned" -eq 1 ]; then
+            codesign --force --sign - --preserve-metadata=entitlements "$app"
+          fi
+
+          while IFS= read -r -d '' bin; do
+            kind=$(file -b "$bin")
+            if [[ "$kind" == Mach-O* ]]; then
+              archs=$(lipo -archs "$bin" | xargs)
+              echo "$bin: $archs"
+              if [ "$archs" != "$TARGET_ARCH" ]; then
+                echo "Unexpected arch '$archs' in $bin (expected '$TARGET_ARCH')" >&2
+                exit 1
+              fi
+            fi
+          done < <(find "$app" -type f -print0)
+
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "build/flDoc-macos-${TARGET_ARCH}.zip"
 
       - name: Upload macOS app archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: flDoc-macos-universal
-          path: build/flDoc-macos-universal.zip
+          name: flDoc-macos-${{ matrix.arch }}
+          path: build/flDoc-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
           overwrite: true
 
@@ -183,12 +254,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           sha256sum --check SHA256SUMS.txt
           version=${GITHUB_REF_NAME#v}
-          apk="flDoc-${version}-android.apk"
-          mac="flDoc-${version}-macos-universal.zip"
+          apk="flDoc-${version}-android-arm64-v8a.apk"
+          mac_arm64="flDoc-${version}-macos-arm64.zip"
+          mac_x86_64="flDoc-${version}-macos-x86_64.zip"
           mv app-release.apk "$apk"
-          mv flDoc-macos-universal.zip "$mac"
-          sha256sum "$apk" "$mac" >> SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" "flDoc-Setup-$version.exe" "$apk" "$mac" SHA256SUMS.txt \
+          mv flDoc-macos-arm64.zip "$mac_arm64"
+          mv flDoc-macos-x86_64.zip "$mac_x86_64"
+          sha256sum "$apk" "$mac_arm64" "$mac_x86_64" >> SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" \
+            "flDoc-Setup-$version.exe" "$apk" "$mac_arm64" "$mac_x86_64" SHA256SUMS.txt \
             --verify-tag --title "flDoc $GITHUB_REF_NAME" --generate-notes

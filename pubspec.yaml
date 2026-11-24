@@ -1,7 +1,7 @@
 name: fldoc
 description: "flDoc - Windows floating offline Markdown documentation reader with AI search & RAG."
 publish_to: 'none'
-version: 0.1.5+3
+version: 0.1.6+4
 
 environment:
   sdk: ^3.14.0
