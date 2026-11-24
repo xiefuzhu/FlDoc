@@ -45,8 +45,8 @@ flutter test
 # 构建 Windows Release（自动将 third_party/ripgrep/rg.exe 复制到 exe 同目录）
 flutter build windows --release
 
-# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.4.exe）
-iscc /DAppVersion=0.1.4 installer\flDoc.iss
+# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.5.exe）
+iscc /DAppVersion=0.1.5 installer\flDoc.iss
 ```
 
 ### GitHub Actions 发布
