@@ -7,7 +7,9 @@ import 'package:window_manager/window_manager.dart';
 import '../features/ai/ai_controller.dart';
 import '../features/ai/ui/ai_panel.dart';
 import '../features/home/home_view.dart';
+import '../features/library/android_library_import.dart';
 import '../features/library/library_controller.dart';
+import '../features/library/library_transfer.dart';
 import '../features/library/models.dart';
 import '../features/library/validator/library_validator.dart';
 import '../features/palette/command_registry.dart';
@@ -18,11 +20,14 @@ import '../features/settings/oobe/oobe_dialog.dart';
 import '../features/settings/settings_controller.dart';
 import '../features/settings/ui/settings_page.dart';
 import '../features/sidebar/sidebar.dart';
+import 'platform_shells.dart';
 import 'providers.dart';
 
 /// Main application shell: frameless title bar + three-pane layout + overlays (doc 01 §1).
 class AppShell extends ConsumerStatefulWidget {
-  const AppShell({super.key});
+  const AppShell({super.key, this.platform = TargetPlatform.windows});
+
+  final TargetPlatform platform;
 
   @override
   ConsumerState<AppShell> createState() => _AppShellState();
@@ -39,7 +44,7 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   void _openImportForm() {
     ref.read(paletteProvider.notifier).openSubmode(const FormSubmode(
-          title: '导入文档库',
+          title: '从网站制作文档库',
           kind: FormModeKind.importLibrary,
         ));
   }
@@ -72,6 +77,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     final pal = ref.watch(paletteProvider);
     final theme = FluentTheme.of(context);
     final dark = theme.brightness == Brightness.dark;
+    final android = widget.platform == TargetPlatform.android;
+    final mac = widget.platform == TargetPlatform.macOS;
+    final viewPadding = MediaQuery.paddingOf(context);
 
     // Auto-clear toast notice after 3.5 seconds.
     ref.listen(noticeProvider, (_, next) {
@@ -85,14 +93,44 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     final center = switch (nav.view) {
       AppView.home => HomeView(
+          mac: mac,
           onImportLibrary: _openImportForm,
           onValidateLibrary: _openValidationFor,
         ),
-      AppView.reader => const ReaderView(),
+      AppView.reader => ReaderView(compact: android),
       AppView.settings => SettingsPage(
+          platform: widget.platform,
           onRerunOobe: () => ref.read(paletteProvider.notifier).openOobe(),
         ),
     };
+
+    final Widget body;
+    if (android) {
+      body = AndroidShell(
+        content: center,
+        onOpenChatHistory: _openChatHistory,
+        onImportFolder: () => importAndroidLibrary(ref, context),
+        onImportHelp: _openImportForm,
+      );
+    } else if (mac) {
+      body = MacShell(content: center, onOpenChatHistory: _openChatHistory);
+    } else {
+      body = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const RepaintBoundary(child: AppSidebar()),
+          Expanded(
+            child: RepaintBoundary(
+              child: ColoredBox(
+                color: dark ? const Color(0xFF202020) : const Color(0xFFFFFFFF),
+                child: center,
+              ),
+            ),
+          ),
+          RepaintBoundary(child: AiPanel(onOpenHistory: _openChatHistory)),
+        ],
+      );
+    }
 
     return Container(
       color: theme.scaffoldBackgroundColor,
@@ -100,7 +138,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         children: [
           Column(
             children: [
-              const RepaintBoundary(child: _TitleBar()),
+              if (!android && !mac) const RepaintBoundary(child: _TitleBar()),
               if (settingsErr != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
@@ -111,28 +149,12 @@ class _AppShellState extends ConsumerState<AppShell> {
                     onClose: () => ref.read(settingsErrorProvider.notifier).set(null),
                   ),
                 ),
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const RepaintBoundary(child: AppSidebar()),
-                    Expanded(
-                      child: RepaintBoundary(
-                        child: Container(
-                          color: dark ? const Color(0xFF202020) : const Color(0xFFFFFFFF),
-                          child: center,
-                        ),
-                      ),
-                    ),
-                    RepaintBoundary(child: AiPanel(onOpenHistory: _openChatHistory)),
-                  ],
-                ),
-              ),
+              Expanded(child: ExcludeFocus(excluding: android && pal.open, child: body)),
             ],
           ),
 
           // Hover link status pill (FR-LK-04)
-          if (statusText != null && statusText.isNotEmpty)
+          if (!android && statusText != null && statusText.isNotEmpty)
             Positioned(
               left: 12,
               bottom: 10,
@@ -158,7 +180,8 @@ class _AppShellState extends ConsumerState<AppShell> {
           // Toast notification
           if (notice != null)
             Positioned(
-              top: 46,
+              top: android ? viewPadding.top + 54 : mac ? 64 : 46,
+              left: android ? 16 : null,
               right: 16,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 400),
@@ -172,15 +195,26 @@ class _AppShellState extends ConsumerState<AppShell> {
             ),
 
           // Floating Command Palette overlay (Ctrl+Shift+P)
-          const CommandPaletteOverlay(),
+          if (android)
+            Positioned.fill(
+              child: SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+                  child: const CommandPaletteOverlay(mobile: true),
+                ),
+              ),
+            )
+          else
+            const CommandPaletteOverlay(),
 
           // First-Run OOBE Wizard (doc 06 §9)
           if (pal.showOobe)
             OobeDialog(
+              platform: widget.platform,
               onComplete: () => ref.read(paletteProvider.notifier).closeOobe(),
               onCompleteAndImport: () {
                 ref.read(paletteProvider.notifier).closeOobe();
-                _openImportForm();
+                ref.read(libraryTransferProvider).importPackage();
               },
             ),
         ],

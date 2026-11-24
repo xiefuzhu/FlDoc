@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
 
@@ -11,10 +12,13 @@ import '../../reader/markdown/md_model.dart';
 import '../../reader/markdown/md_parser.dart';
 import '../models.dart';
 
-/// Cancellation handle for an in-flight ripgrep search.
+part 'local_markdown_search.dart';
+
+/// Cancellation handle for an in-flight full-text search.
 class RgCancelToken {
   bool _cancelled = false;
   final List<Process> _procs = [];
+  final Set<void Function()> _onCancel = {};
 
   bool get isCancelled => _cancelled;
 
@@ -34,6 +38,10 @@ class RgCancelToken {
       } catch (_) {}
     }
     _procs.clear();
+    for (final stop in _onCancel) {
+      stop();
+    }
+    _onCancel.clear();
   }
 }
 
@@ -74,13 +82,22 @@ String resolveRgPath(String configuredPath) {
   if (custom.isNotEmpty) return custom;
   final bundled = AppPaths.bundledRgPath;
   if (File(bundled).existsSync()) return bundled;
-  final devPath = p.join(Directory.current.path, 'third_party', 'ripgrep', 'rg.exe');
-  if (File(devPath).existsSync()) return devPath;
-  return Platform.isWindows ? 'rg.exe' : 'rg';
+  if (Platform.isWindows) {
+    final devPath = p.join(Directory.current.path, 'third_party', 'ripgrep', 'rg.exe');
+    if (File(devPath).existsSync()) return devPath;
+    return 'rg.exe';
+  }
+  if (Platform.isMacOS) {
+    for (final path in ['/opt/homebrew/bin/rg', '/usr/local/bin/rg', '/opt/local/bin/rg']) {
+      if (File(path).existsSync()) return path;
+    }
+  }
+  return 'rg';
 }
 
 /// Reads `rg --version` first line, or null if unavailable.
 Future<String?> getRgVersion(String configuredPath) async {
+  if (Platform.isAndroid) return null;
   try {
     final res = await Process.run(resolveRgPath(configuredPath), const ['--version'], runInShell: false);
     if (res.exitCode != 0) return null;
@@ -89,6 +106,12 @@ Future<String?> getRgVersion(String configuredPath) async {
   } catch (_) {
     return null;
   }
+}
+
+Future<String> getSearchEngineLabel(String configuredPath) async {
+  if (Platform.isAndroid) return '内置离线搜索';
+  return await getRgVersion(configuredPath) ??
+      (Platform.isMacOS && configuredPath.trim().isEmpty ? '内置离线搜索' : 'ripgrep 未找到');
 }
 
 /// Builds the argument list for ripgrep without shell interpolation (NFR-05).
@@ -260,9 +283,13 @@ class _DirTarget {
 }
 
 class RgService {
-  RgService({this.configuredPath = ''});
+  RgService({this.configuredPath = ''}) : _useLocal = Platform.isAndroid;
+
+  RgService.local() : configuredPath = '', _useLocal = true;
 
   final String configuredPath;
+  final bool _useLocal;
+  bool get _canFallBack => Platform.isMacOS && configuredPath.trim().isEmpty;
 
   /// Runs global full-text search across [targets] and returns page-grouped,
   /// spec-sorted results.
@@ -286,16 +313,16 @@ class RgService {
     final targets = _resolveTargets(libraries, scope, currentLibrary, currentVersion);
     if (targets.isEmpty) return const RgSearchResult();
 
-    final args = buildRgArgs(
+    final raw = await _runSearch(
       query: trimmed,
       searchDirs: targets.map((t) => t.dir).toList(),
       caseMode: caseMode,
       wholeWord: wholeWord,
       regex: regex,
       contextLines: contextLines,
+      maxResults: maxResults,
+      cancelToken: cancelToken,
     );
-
-    final raw = await _runRg(args, maxResults: maxResults, cancelToken: cancelToken);
     if (cancelToken?.isCancelled ?? false) return const RgSearchResult();
     if (raw.error != null) return RgSearchResult(error: raw.error);
 
@@ -389,11 +416,25 @@ class RgService {
     final kws = keywords.map((k) => k.trim()).where((k) => k.isNotEmpty).toSet().take(8).toList();
     if (kws.isEmpty || searchDirs.isEmpty) return {};
 
+    Future<Map<String, List<RgRawFileHits>>> localKeywords() async {
+      final local = await _runLocalSearch(
+        (queries: kws, dirs: searchDirs, caseMode: 'ignore', wholeWord: false,
+          regex: false, context: 0, fileLimit: 25, totalLimit: 200),
+        cancelToken,
+      );
+      return {
+        if (local is List<RgParseOutput>)
+          for (var i = 0; i < kws.length; i++) kws[i]: local[i].files,
+      };
+    }
+    if (_useLocal) return localKeywords();
+
     final result = <String, List<RgRawFileHits>>{};
     const maxConcurrent = 4;
     var next = 0;
+    var useFallback = false;
     Future<void> worker() async {
-      while (next < kws.length) {
+      while (next < kws.length && !useFallback) {
         if (cancelToken?.isCancelled ?? false) return;
         final kw = kws[next++];
         final args = buildRgArgs(
@@ -405,6 +446,7 @@ class RgService {
           maxCount: 25,
         );
         final raw = await _runRg(args, maxResults: 200, cancelToken: cancelToken);
+        if (raw.startFailed && _canFallBack) useFallback = true;
         if (raw.output != null) {
           result[kw] = raw.output!.files;
         }
@@ -412,7 +454,7 @@ class RgService {
     }
 
     await Future.wait([for (var i = 0; i < maxConcurrent && i < kws.length; i++) worker()]);
-    return result;
+    return useFallback ? localKeywords() : result;
   }
 
   /// Code-block regex fallback for Symbol search (spec 06 §3).
@@ -431,15 +473,16 @@ class RgService {
 
     final esc = RegExp.escape(q);
     final pattern = r'\b' + esc + r'\b\s*[(<{:=]|class\s+' + esc + r'|' + esc + r'\s*\(';
-    final args = buildRgArgs(
+    final raw = await _runSearch(
       query: pattern,
       searchDirs: targets.map((t) => t.dir).toList(),
       caseMode: 'sensitive',
       regex: true,
       contextLines: 0,
       maxCount: 10,
+      maxResults: 80,
+      cancelToken: cancelToken,
     );
-    final raw = await _runRg(args, maxResults: 80, cancelToken: cancelToken);
     if (cancelToken?.isCancelled ?? false) return const [];
     if (raw.output == null) return const [];
 
@@ -450,7 +493,7 @@ class RgService {
       // Only keep hits inside fenced code blocks.
       List<(int, int)> codeRanges;
       try {
-        final doc = MdParser.parse(File(fh.filePath).readAsStringSync());
+        final doc = MdParser.parse(await File(fh.filePath).readAsString());
         codeRanges = [
           for (final b in doc.blocks)
             if (b.kind == BlockKind.code) (b.startLine, b.endLine),
@@ -524,7 +567,36 @@ class RgService {
     return t.startsWith('#') || t.startsWith('title:');
   }
 
-  Future<({RgParseOutput? output, String? error})> _runRg(
+  Future<({RgParseOutput? output, String? error})> _runSearch({
+    required String query,
+    required List<String> searchDirs,
+    required String caseMode,
+    bool wholeWord = false,
+    bool regex = false,
+    required int contextLines,
+    int maxCount = 50,
+    required int maxResults,
+    RgCancelToken? cancelToken,
+  }) async {
+    if (!_useLocal) {
+      final args = buildRgArgs(
+        query: query, searchDirs: searchDirs, caseMode: caseMode,
+        wholeWord: wholeWord, regex: regex, contextLines: contextLines, maxCount: maxCount,
+      );
+      final raw = await _runRg(args, maxResults: maxResults, cancelToken: cancelToken);
+      if (!raw.startFailed || !_canFallBack) return (output: raw.output, error: raw.error);
+    }
+    final local = await _runLocalSearch(
+      (queries: [query], dirs: searchDirs, caseMode: caseMode, wholeWord: wholeWord,
+        regex: regex, context: contextLines, fileLimit: maxCount, totalLimit: maxResults),
+      cancelToken,
+    );
+    return local is List<RgParseOutput>
+        ? (output: local.single, error: null)
+        : (output: null, error: local as String);
+  }
+
+  Future<({RgParseOutput? output, String? error, bool startFailed})> _runRg(
     List<String> args, {
     required int maxResults,
     RgCancelToken? cancelToken,
@@ -535,7 +607,7 @@ class RgService {
       proc = await Process.start(bin, args, runInShell: false);
     } catch (e) {
       Log.warn('rg start failed ($bin): $e');
-      return (output: null, error: '无法启动 ripgrep（$bin）：$e');
+      return (output: null, error: '无法启动 ripgrep（$bin）：$e', startFailed: true);
     }
     cancelToken?.attach(proc);
 
@@ -563,9 +635,9 @@ class RgService {
     // rg returns 0 (matches), 1 (no matches), 2 (error - e.g. invalid regex).
     if (code == 2 && !parser.truncated && !(cancelToken?.isCancelled ?? false)) {
       final msg = stderrBuf.toString().trim();
-      return (output: null, error: msg.isEmpty ? '搜索表达式无效' : msg);
+      return (output: null, error: msg.isEmpty ? '搜索表达式无效' : msg, startFailed: false);
     }
-    return (output: parser.finish(), error: null);
+    return (output: parser.finish(), error: null, startFailed: false);
   }
 }
 

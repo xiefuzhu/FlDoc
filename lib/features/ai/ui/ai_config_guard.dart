@@ -29,7 +29,7 @@ Future<bool> ensureAiReady(
       title: Text(isBoth ? '尚未配置 AI' : '尚未配置对话模型'),
       content: Text(
         isBoth
-            ? '使用 AI 智能搜索与文档问答前，需要先配置对话模型或嵌入模型（API Key 将安全保存在 Windows 凭据管理器中）。'
+            ? '使用 AI 智能搜索与文档问答前，需要先配置对话模型或嵌入模型。'
             : 'RAG 问答需要配置 OpenAI 兼容的对话模型（Base URL、API Key 与模型名）。',
       ),
       actions: [

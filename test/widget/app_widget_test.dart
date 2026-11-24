@@ -11,6 +11,7 @@ import 'package:fldoc/features/palette/command_registry.dart' show DynamicModeKi
 import 'package:fldoc/features/palette/palette_overlay.dart';
 import 'package:fldoc/features/reader/find/find_controller.dart';
 import 'package:fldoc/features/reader/navigation/navigation_controller.dart';
+import 'package:fldoc/features/search/rg/rg_service.dart';
 import 'package:fldoc/features/search/symbols/symbol_index.dart';
 import 'package:fldoc/features/settings/credential_store.dart';
 import 'package:fldoc/features/settings/settings_controller.dart';
@@ -26,7 +27,7 @@ import 'package:path/path.dart' as p;
 void main() {
   final fixturesRoot = p.normalize(p.join(Directory.current.path, 'test', 'fixtures', 'libraries'));
 
-  (ProviderContainer, Directory, AppDatabase, SettingsStore, UiState) makeEnv({String? customRoot}) {
+  (ProviderContainer, Directory, AppDatabase, SettingsStore, UiState) makeEnv({String? customRoot, bool localSearch = false}) {
     final tmp = Directory.systemTemp.createTempSync('fldoc_wt_');
     AppPaths.setForTest(tmp.path);
     final db = AppDatabase.inMemory();
@@ -44,9 +45,68 @@ void main() {
         windowServiceProvider.overrideWithValue(null),
         settingsStoreProvider.overrideWithValue(store),
         credentialStoreProvider.overrideWithValue(MemoryCredentialStore()),
+        if (localSearch) rgServiceProvider.overrideWithValue(RgService.local()),
       ],
     );
     return (container, tmp, db, store, ui);
+  }
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.android]) {
+    testWidgets('$platform layout opens offline search, follows a result and navigates the chapter outline', (tester) async {
+      final mobile = platform == TargetPlatform.android;
+      tester.view.physicalSize = mobile ? const Size(360, 780) : const Size(1080, 720);
+      tester.view.devicePixelRatio = 1;
+      final (container, tmp, db, store, ui) = makeEnv(localSearch: true);
+      addTearDown(() {
+        tester.view.reset();
+        container.dispose();
+        store.dispose();
+        ui.dispose();
+        db.close();
+        tmp.deleteSync(recursive: true);
+      });
+
+      Future<void> waitFor(bool Function() done) async {
+        for (var i = 0; i < 40 && !done(); i++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        expect(done(), isTrue);
+      }
+
+      await tester.pumpWidget(UncontrolledProviderScope(container: container, child: FlDocApp(platform: platform)));
+      await waitFor(() => container.read(libraryProvider).loadedOnce);
+      await tester.pump();
+      expect(find.text('导入资料包'), findsOneWidget);
+      final libraryMenu = mobile ? find.byTooltip('文档库操作') : find.text('操作');
+      await tester.tap(libraryMenu.first);
+      await tester.pumpAndSettle();
+      expect(find.text('导出资料包'), findsOneWidget);
+      expect(find.text('分享资料包'), findsOneWidget);
+      await tester.tapAt(const Offset(5, 70));
+      await tester.pumpAndSettle();
+      final search = find.text(mobile ? '搜索' : '搜索文档');
+      await tester.tap(search);
+      await tester.pump();
+      final query = find.byKey(const ValueKey('palette-input-field'));
+      expect(query, findsOneWidget);
+      await tester.enterText(query, 'ProviderScope');
+      await tester.pump(const Duration(milliseconds: 650));
+      await waitFor(() => find.textContaining('共 ').evaluate().isNotEmpty &&
+          find.textContaining('共 0 处').evaluate().isEmpty);
+      final hit = find.textContaining('快速开始').last;
+      await tester.tap(hit);
+      await waitFor(() => container.read(navigationProvider).page != null);
+      expect(container.read(navigationProvider).page?.lib.name, 'Riverpod');
+      if (mobile) {
+        await tester.tap(find.byTooltip('章节目录'));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('读取 Provider').last);
+      await waitFor(() => container.read(navigationProvider).page?.title == '读取 Provider');
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets('end-to-end app smoke: Home -> Reader -> Find -> Palette focus -> Chat panel persistence -> Settings',
@@ -75,6 +135,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     // 1. Home -> Reader & language toggle.
+    expect(find.text('导入资料包'), findsOneWidget);
+    await tester.tap(find.byIcon(FluentIcons.more).first);
+    await tester.pumpAndSettle();
+    expect(find.text('导出资料包'), findsOneWidget);
+    expect(find.text('分享资料包'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 70));
+    await tester.pumpAndSettle();
     expect(find.text('Riverpod'), findsWidgets);
     expect(find.text('plain-notes'), findsWidgets);
     await tester.tap(find.text('Riverpod').last);

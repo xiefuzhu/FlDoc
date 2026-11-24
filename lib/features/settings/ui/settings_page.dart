@@ -8,6 +8,7 @@ import '../../../app/providers.dart';
 import '../../../app/theme.dart';
 import '../../../core/paths.dart';
 import '../../ai/index/embed_indexer.dart';
+import '../../library/android_library_import.dart';
 import '../../library/library_controller.dart';
 import '../../reader/mermaid/mermaid_renderer.dart';
 import '../../reader/navigation/navigation_controller.dart';
@@ -18,9 +19,10 @@ import 'ai_model_form.dart';
 
 /// Settings page with 8 sections bound directly to [settingsProvider] (FR-ST-01..06).
 class SettingsPage extends ConsumerStatefulWidget {
-  const SettingsPage({super.key, required this.onRerunOobe});
+  const SettingsPage({super.key, required this.onRerunOobe, this.platform = TargetPlatform.windows});
 
   final VoidCallback onRerunOobe;
+  final TargetPlatform platform;
 
   @override
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
@@ -43,13 +45,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   String? _rgVersion;
   String? _webView2Version;
   bool _checkedAbout = false;
+  bool get _mobile => widget.platform == TargetPlatform.android;
+  bool get _windows => widget.platform == TargetPlatform.windows;
+  bool get _mac => widget.platform == TargetPlatform.macOS;
+  Iterable<(String, String, IconData)> get _visibleSections =>
+      _sections.where((section) => _windows || section.$1 != 'window');
 
   @override
   void initState() {
     super.initState();
     final target = ref.read(navigationProvider).settingsSection;
     _lastHandledNavSec = target;
-    if (target != null && _sections.any((e) => e.$1 == target)) {
+    if (target != null && _visibleSections.any((e) => e.$1 == target)) {
       _section = target;
     }
   }
@@ -58,7 +65,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     if (_checkedAbout) return;
     _checkedAbout = true;
     final rgPath = ref.read(settingsProvider).rgPath;
-    getRgVersion(rgPath).then((v) {
+    getSearchEngineLabel(rgPath).then((v) {
       if (mounted) setState(() => _rgVersion = v);
     });
     MermaidRenderer.checkWebView2Version().then((v) {
@@ -71,7 +78,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final navSec = ref.watch(navigationProvider.select((s) => s.settingsSection));
     if (navSec == null) {
       _lastHandledNavSec = null;
-    } else if (_sections.any((e) => e.$1 == navSec) && navSec != _lastHandledNavSec) {
+    } else if (_visibleSections.any((e) => e.$1 == navSec) && navSec != _lastHandledNavSec) {
       // Honor explicit programmatic jump to a section once.
       _lastHandledNavSec = navSec;
       if (navSec != _section) {
@@ -90,6 +97,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
     if (_section == 'about') _ensureAboutLoaded();
 
+    final content = SingleChildScrollView(
+      padding: _mobile ? const EdgeInsets.fromLTRB(16, 14, 16, 28) : const EdgeInsets.fromLTRB(28, 22, 28, 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 680),
+        child: switch (_section) {
+          'general' => _buildGeneral(settings, ctl),
+          'appearance' => _buildAppearance(settings, ctl),
+          'reading' => _buildReading(settings, ctl),
+          'search' => _buildSearch(settings, ctl),
+          'ai' => _buildAi(settings, ctl),
+          'window' => _buildWindow(settings, ctl),
+          'libraries' => _buildLibraries(settings, ctl),
+          'about' => _buildAbout(theme),
+          _ => const SizedBox.shrink(),
+        },
+      ),
+    );
+    if (_mobile) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: ComboBox<String>(
+              value: _section,
+              isExpanded: true,
+              items: [for (final (id, label, _) in _visibleSections) ComboBoxItem(value: id, child: Text(label))],
+              onChanged: (id) {
+                if (id != null) setState(() => _section = id);
+              },
+            ),
+          ),
+          Expanded(child: content),
+        ],
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -105,7 +149,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
                 child: Text('设置', style: theme.typography.subtitle),
               ),
-              for (final sec in _sections)
+              for (final sec in _visibleSections)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 1),
                   child: GestureDetector(
@@ -141,25 +185,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
         ),
         // Content pane
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(28, 22, 28, 40),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 680),
-              child: switch (_section) {
-                'general' => _buildGeneral(settings, ctl),
-                'appearance' => _buildAppearance(settings, ctl),
-                'reading' => _buildReading(settings, ctl),
-                'search' => _buildSearch(settings, ctl),
-                'ai' => _buildAi(settings, ctl),
-                'window' => _buildWindow(settings, ctl),
-                'libraries' => _buildLibraries(settings, ctl),
-                'about' => _buildAbout(theme),
-                _ => const SizedBox.shrink(),
-              },
-            ),
-          ),
-        ),
+        Expanded(child: content),
       ],
     );
   }
@@ -169,7 +195,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _SectionTitle('常规'),
-        _SettingTile(
+        if (_windows) _SettingTile(
           title: '侧边栏收起形态',
           subtitle: '按 Ctrl+B 收起侧边栏时的展示方式',
           trailing: ComboBox<String>(
@@ -412,12 +438,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
           ),
         ),
-        _SettingTile(
+        if (!_mobile) _SettingTile(
           title: 'ripgrep 可执行文件路径',
-          subtitle: '留空使用随软件打包的内置 rg.exe',
+          subtitle: _mac ? '留空自动选择 ripgrep 或内置离线搜索' : '留空使用随软件打包的内置 rg.exe',
           bottom: TextBox(
             controller: TextEditingController(text: s.rgPath),
-            placeholder: '留空使用内置 rg.exe',
+            placeholder: _mac ? '留空自动选择搜索引擎' : '留空使用内置 rg.exe',
             onSubmitted: (v) => ctl.set('search.rgPath', v.trim()),
           ),
         ),
@@ -568,7 +594,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
+                if (!_mobile) IconButton(
                   icon: const Icon(FluentIcons.folder_open, size: 14),
                   onPressed: () => _openInShell(r),
                 ),
@@ -587,6 +613,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           children: [
             FilledButton(
               onPressed: () async {
+                if (_mobile) {
+                  await importAndroidLibrary(ref, context);
+                  return;
+                }
                 final dir = await FilePicker.getDirectoryPath(dialogTitle: '选择文档库根目录');
                 if (dir == null || dir.trim().isEmpty) return;
                 final norm = dir.replaceAll('\\', '/');
@@ -594,7 +624,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ctl.set('libraryRoots', [...roots, norm]);
                 }
               },
-              child: const Text('添加根目录'),
+              child: Text(_mobile ? '导入文件夹' : '添加根目录'),
             ),
             const SizedBox(width: 8),
             Button(
@@ -617,10 +647,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         const _SectionTitle('关于 flDoc'),
         const _SettingTile(title: 'flDoc', subtitle: '离线 Markdown 文档阅读器 · 版本 0.1.6'),
         _SettingTile(
-          title: 'ripgrep (rg)',
-          subtitle: _rgVersion ?? '未检测到（请检查内置 rg.exe 或搜索设置中的路径）',
+          title: '全文搜索引擎',
+          subtitle: _rgVersion ?? '检测中…',
         ),
-        _SettingTile(
+        if (_windows) _SettingTile(
           title: 'WebView2 Runtime（Mermaid 图表渲染）',
           subtitle: _webView2Version != null
               ? '已安装：$_webView2Version'
@@ -629,7 +659,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         _SettingTile(
           title: '应用数据目录',
           subtitle: AppPaths.instance.supportDir,
-          trailing: Button(
+          trailing: _mobile ? null : Button(
             onPressed: () => _openInShell(AppPaths.instance.supportDir),
             child: const Text('打开目录'),
           ),
@@ -639,6 +669,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   void _openInShell(String path) {
+    if (_mac && Platform.isMacOS) {
+      Process.start('/usr/bin/open', [path]);
+      return;
+    }
     if (!Platform.isWindows) return;
     final winPath = path.replaceAll('/', '\\');
     if (Directory(winPath).existsSync()) {
@@ -691,6 +725,16 @@ class _SettingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = FluentTheme.of(context);
+    final label = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500)),
+        if (subtitle != null) ...[
+          const SizedBox(height: 2),
+          Text(subtitle!, style: TextStyle(fontSize: 12, color: theme.resources.textFillColorSecondary)),
+        ],
+      ],
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Card(
@@ -698,23 +742,18 @@ class _SettingTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
+            if (trailing == null)
+              label
+            else
+              LayoutBuilder(builder: (context, constraints) {
+                if (!Platform.isWindows && constraints.maxWidth < 345) {
+                  return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500)),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(subtitle!, style: TextStyle(fontSize: 12, color: theme.resources.textFillColorSecondary)),
-                      ],
-                    ],
-                  ),
-                ),
-                if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-              ],
-            ),
+                    children: [label, const SizedBox(height: 9), trailing!],
+                  );
+                }
+                return Row(children: [Expanded(child: label), const SizedBox(width: 12), trailing!]);
+              }),
             if (bottom != null) ...[const SizedBox(height: 10), bottom!],
           ],
         ),

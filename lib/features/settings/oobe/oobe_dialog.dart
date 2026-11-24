@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/paths.dart';
+import '../../library/android_library_import.dart';
 import '../settings_controller.dart';
 import '../ui/ai_model_form.dart';
 
@@ -15,10 +16,12 @@ class OobeDialog extends ConsumerStatefulWidget {
     super.key,
     required this.onComplete,
     required this.onCompleteAndImport,
+    this.platform = TargetPlatform.windows,
   });
 
   final VoidCallback onComplete;
   final VoidCallback onCompleteAndImport;
+  final TargetPlatform platform;
 
   @override
   ConsumerState<OobeDialog> createState() => _OobeDialogState();
@@ -26,6 +29,8 @@ class OobeDialog extends ConsumerStatefulWidget {
 
 class _OobeDialogState extends ConsumerState<OobeDialog> {
   int _step = 0;
+  bool get _android => widget.platform == TargetPlatform.android;
+  bool get _windows => widget.platform == TargetPlatform.windows;
 
   static const _stepTitles = [
     '欢迎使用 flDoc',
@@ -64,7 +69,7 @@ class _OobeDialogState extends ConsumerState<OobeDialog> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 620, maxHeight: 560),
         child: Container(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.all(_android ? 14 : 24),
           decoration: BoxDecoration(
             color: theme.menuColor,
             borderRadius: BorderRadius.circular(10),
@@ -79,8 +84,7 @@ class _OobeDialogState extends ConsumerState<OobeDialog> {
               // Step progress indicator
               Row(
                 children: [
-                  Text(_stepTitles[_step], style: theme.typography.subtitle),
-                  const Spacer(),
+                  Expanded(child: Text(_stepTitles[_step], style: theme.typography.subtitle)),
                   Text('${_step + 1} / ${_stepTitles.length}',
                       style: TextStyle(fontSize: 12, color: theme.resources.textFillColorSecondary)),
                 ],
@@ -102,30 +106,29 @@ class _OobeDialogState extends ConsumerState<OobeDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-              // Footer controls
-              Row(
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   if (_step < _stepTitles.length - 1)
                     Button(
                       onPressed: () => setState(() => _step++),
                       child: const Text('跳过此步'),
                     ),
-                  const Spacer(),
                   if (_step > 0) ...[
                     Button(onPressed: () => setState(() => _step--), child: const Text('上一步')),
-                    const SizedBox(width: 8),
                   ],
                   if (_step < _stepTitles.length - 1)
                     FilledButton(onPressed: () => setState(() => _step++), child: const Text('下一步'))
                   else ...[
                     Button(
                       onPressed: () => _finish(openImport: true),
-                      child: const Text('导入第一个文档库'),
+                      child: const Text('导入资料包'),
                     ),
-                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: () => _finish(openImport: false),
-                      child: const Text('进入 Home'),
+                      child: const Text('进入文档库'),
                     ),
                   ],
                 ],
@@ -142,13 +145,15 @@ class _OobeDialogState extends ConsumerState<OobeDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'flDoc 是专为写代码场景打造的 Windows 悬浮离线文档阅读器。把在线教程交给 AI Agent 抓取到本地后，随时置顶查阅、极速检索与提问。',
+          _windows
+              ? 'flDoc 是专为写代码场景打造的 Windows 悬浮离线文档阅读器。把在线教程交给 AI Agent 抓取到本地后，随时置顶查阅、极速检索与提问。'
+              : 'flDoc 在本地管理 Markdown 文档库。打开一篇文档阅读，也可以在整个库里搜索代码和正文。',
           style: TextStyle(fontSize: 13.5, height: 1.6, color: theme.resources.textFillColorPrimary),
         ),
         const SizedBox(height: 18),
-        _IntroStep(icon: FluentIcons.download, color: accent, title: '1. 导入', desc: '生成标准化提示词，由 AI Agent 抓取并翻译文档到本地。'),
-        _IntroStep(icon: FluentIcons.reading_mode, color: accent, title: '2. 阅读', desc: '置顶悬浮在屏幕一角，支持中英切换、代码高亮、Mermaid 与公式。'),
-        _IntroStep(icon: FluentIcons.chat, color: accent, title: '3. 提问', desc: '内置 ripgrep 极速搜索 + 向量语义混合召回 + 可点击引用的 RAG 问答。'),
+        _IntroStep(icon: FluentIcons.download, color: accent, title: '1. 导入', desc: '导入其他设备的资料包，或添加本地 Markdown 文档。'),
+        _IntroStep(icon: FluentIcons.reading_mode, color: accent, title: '2. 阅读', desc: _windows ? '置顶悬浮在屏幕一角，支持中英切换、代码高亮、Mermaid 与公式。' : '从章节目录打开文档，支持中英切换、代码高亮和公式。'),
+        _IntroStep(icon: FluentIcons.chat, color: accent, title: '3. 提问', desc: '离线全文搜索、向量语义检索和可点击引用的文档问答。'),
       ],
     );
   }
@@ -189,13 +194,17 @@ class _OobeDialogState extends ConsumerState<OobeDialog> {
           alignment: Alignment.centerLeft,
           child: Button(
             onPressed: () async {
+              if (_android) {
+                await importAndroidLibrary(ref, context);
+                return;
+              }
               final dir = await FilePicker.getDirectoryPath(dialogTitle: '添加文档库根目录');
               if (dir != null && dir.trim().isNotEmpty) {
                 final norm = dir.replaceAll('\\', '/');
                 if (!roots.contains(norm)) ctl.set('libraryRoots', [...roots, norm]);
               }
             },
-            child: const Text('添加更多根目录'),
+            child: Text(_android ? '导入文件夹' : '添加更多根目录'),
           ),
         ),
       ],
@@ -280,7 +289,7 @@ class _OobeDialogState extends ConsumerState<OobeDialog> {
         const SizedBox(height: 10),
         Text(
           '• 按 Ctrl+Shift+P 随时打开命令面板，执行全局搜索、符号查找、AI 问答与全部设置。\n'
-          '• 点击「导入第一个文档库」即可填写网址生成 Agent 爬取提示词。\n'
+          '• 点击「导入资料包」可以打开其他设备导出的文档库。\n'
           '• 随时可通过命令「首选项: 重新运行初始设置向导」回到这里。',
           style: TextStyle(fontSize: 13, height: 1.7, color: theme.resources.textFillColorSecondary),
         ),

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   url_launcher_windows
+  share_plus
   webview_windows
 )
 

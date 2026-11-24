@@ -21,9 +21,10 @@ import 'ai_config_guard.dart';
 
 /// Right-hand collapsible, resizable RAG AI chat panel (FR-AI-03, FR-AI-04, doc 06 §5.3).
 class AiPanel extends ConsumerStatefulWidget {
-  const AiPanel({super.key, required this.onOpenHistory});
+  const AiPanel({super.key, required this.onOpenHistory, this.embedded = false});
 
   final VoidCallback onOpenHistory;
+  final bool embedded;
 
   @override
   ConsumerState<AiPanel> createState() => _AiPanelState();
@@ -109,6 +110,10 @@ class _AiPanelState extends ConsumerState<AiPanel> {
         );
   }
 
+  void _openAiSettings() {
+    ref.read(navigationProvider.notifier).openSettings(section: 'ai');
+  }
+
   @override
   Widget build(BuildContext context) {
     final ai = ref.watch(aiControllerProvider);
@@ -135,23 +140,8 @@ class _AiPanelState extends ConsumerState<AiPanel> {
       maxWidth: null,
     );
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Draggable left resize splitter
-        MouseRegion(
-          cursor: SystemMouseCursors.resizeColumn,
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onHorizontalDragUpdate: (d) {
-              setState(() => _width = (_width - d.delta.dx).clamp(280.0, 640.0));
-            },
-            onHorizontalDragEnd: (_) => ref.read(uiStateProvider).aiPanelWidth = _width,
-            child: const SizedBox(width: 4),
-          ),
-        ),
-        Container(
-          width: _width,
+    final panel = Container(
+          width: widget.embedded ? double.infinity : _width,
           decoration: BoxDecoration(
             color: bgColor,
             border: Border(left: BorderSide(color: borderColor)),
@@ -231,7 +221,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                         child: Text(ai.vectorNotice!, style: const TextStyle(fontSize: 11.5)),
                       ),
                       HyperlinkButton(
-                        onPressed: () => ref.read(navigationProvider.notifier).openSettings(section: 'ai'),
+                        onPressed: _openAiSettings,
                         child: const Text('配置嵌入模型', style: TextStyle(fontSize: 11.5)),
                       ),
                     ],
@@ -284,7 +274,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                         Button(onPressed: ctl.retryLast, child: const Text('重试')),
                         if (ai.errorKind == AiErrorKind.unauthorized)
                           FilledButton(
-                            onPressed: () => ref.read(navigationProvider.notifier).openSettings(section: 'ai'),
+                            onPressed: _openAiSettings,
                             child: const Text('打开对话模型配置'),
                           ),
                       ],
@@ -306,7 +296,23 @@ class _AiPanelState extends ConsumerState<AiPanel> {
               ),
             ],
           ),
+    );
+    if (widget.embedded) return panel;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MouseRegion(
+          cursor: SystemMouseCursors.resizeColumn,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragUpdate: (d) {
+              setState(() => _width = (_width - d.delta.dx).clamp(280.0, 640.0));
+            },
+            onHorizontalDragEnd: (_) => ref.read(uiStateProvider).aiPanelWidth = _width,
+            child: const SizedBox(width: 4),
+          ),
         ),
+        panel,
       ],
     );
   }
@@ -416,7 +422,7 @@ class _AiPanelState extends ConsumerState<AiPanel> {
                           MenuFlyoutItem(
                             leading: const Icon(FluentIcons.settings, size: 12),
                             text: const Text('配置对话模型…'),
-                            onPressed: () => ref.read(navigationProvider.notifier).openSettings(section: 'ai'),
+                            onPressed: _openAiSettings,
                           ),
                         ],
                       ),

@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../app/providers.dart';
 import '../ai/index/embed_indexer.dart';
 import '../library/library_controller.dart';
+import '../library/library_transfer.dart';
 import '../library/manifest_generator.dart';
 import '../library/models.dart';
 import '../library/validator/library_validator.dart';
@@ -21,10 +22,12 @@ class HomeView extends ConsumerWidget {
     super.key,
     required this.onImportLibrary,
     required this.onValidateLibrary,
+    this.mac = false,
   });
 
   final VoidCallback onImportLibrary;
   final void Function(Library lib) onValidateLibrary;
+  final bool mac;
 
   Future<void> _addRoot(WidgetRef ref) async {
     final dir = await FilePicker.getDirectoryPath(dialogTitle: '选择文档库根目录');
@@ -44,6 +47,7 @@ class HomeView extends ConsumerWidget {
     final indexMap = ref.watch(embedIndexerProvider);
     final valMap = ref.watch(validationResultsProvider);
     final theme = FluentTheme.of(context);
+    final transfer = ref.read(libraryTransferProvider);
 
     if (libState.loading && !libState.loadedOnce) {
       return const Center(child: ProgressRing());
@@ -52,7 +56,61 @@ class HomeView extends ConsumerWidget {
     if (libState.libraries.isEmpty) {
       return _EmptyHome(
         onAddRoot: () => _addRoot(ref),
+        onImportPackage: transfer.importPackage,
         onImport: onImportLibrary,
+      );
+    }
+
+    if (mac) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(32, 32, 32, 36),
+        children: [
+          Text('文档库', style: theme.typography.titleLarge),
+          const SizedBox(height: 6),
+          Text('${libState.libraries.length} 个本地文档库', style: theme.typography.caption),
+          const SizedBox(height: 16),
+          Wrap(spacing: 10, runSpacing: 8, children: [
+            FilledButton(onPressed: transfer.importPackage, child: const Text('导入资料包')),
+            Button(onPressed: () => _addRoot(ref), child: const Text('添加根目录')),
+            Button(onPressed: onImportLibrary, child: const Text('从网站制作文档库')),
+          ]),
+          const SizedBox(height: 24),
+          for (final lib in libState.libraries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Button(
+                onPressed: () => ref.read(navigationProvider.notifier).openLibrary(lib),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      _LibIcon(lib: lib, accent: theme.accentColor.defaultBrushFor(theme.brightness)),
+                      const SizedBox(width: 13),
+                      Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(lib.name, style: theme.typography.bodyStrong),
+                          Text('${lib.defaultVersion.label} · ${lib.pageCount} 页', style: theme.typography.caption),
+                        ],
+                      )),
+                      DropDownButton(
+                        title: const Text('操作'),
+                        items: [
+                          MenuFlyoutItem(text: const Text('导出资料包'), onPressed: () => transfer.exportPackage(lib)),
+                          MenuFlyoutItem(text: const Text('分享资料包'), onPressed: () => transfer.sharePackage(lib, libraryShareOrigin(context))),
+                          MenuFlyoutItem(text: const Text('校验文档库'), onPressed: () => onValidateLibrary(lib)),
+                          if (lib.format == LibraryFormat.plain)
+                            MenuFlyoutItem(text: const Text('生成 manifest'), onPressed: () => _confirmGenerateManifest(context, ref, lib)),
+                          MenuFlyoutItem(text: const Text('重建向量索引'), onPressed: () => _rebuildIndex(context, ref, lib)),
+                          MenuFlyoutItem(text: const Text('在访达中显示'), onPressed: () => _revealInExplorer(lib.dir)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       );
     }
 
@@ -70,10 +128,7 @@ class HomeView extends ConsumerWidget {
                 style: TextStyle(fontSize: 13, color: theme.resources.textFillColorSecondary),
               ),
               const Spacer(),
-              Text(
-                'Ctrl+Shift+P 打开命令面板',
-                style: TextStyle(fontSize: 12, color: theme.resources.textFillColorSecondary),
-              ),
+              Button(onPressed: transfer.importPackage, child: const Text('导入资料包')),
             ],
           ),
           const SizedBox(height: 18),
@@ -87,6 +142,8 @@ class HomeView extends ConsumerWidget {
                   indexStatus: indexMap[lib.key],
                   validation: valMap[lib.key],
                   onOpen: () => ref.read(navigationProvider.notifier).openLibrary(lib),
+                  onExport: () => transfer.exportPackage(lib),
+                  onShare: (origin) => transfer.sharePackage(lib, origin),
                   onValidate: () => onValidateLibrary(lib),
                   onGenerateManifest: lib.format == LibraryFormat.plain
                       ? () => _confirmGenerateManifest(context, ref, lib)
@@ -157,6 +214,8 @@ class HomeView extends ConsumerWidget {
   void _revealInExplorer(String dir) {
     if (Platform.isWindows) {
       Process.start('explorer.exe', [dir.replaceAll('/', '\\')], runInShell: false);
+    } else if (Platform.isMacOS) {
+      Process.start('/usr/bin/open', [dir]);
     }
   }
 }
@@ -167,6 +226,8 @@ class _LibraryCard extends StatefulWidget {
     required this.indexStatus,
     required this.validation,
     required this.onOpen,
+    required this.onExport,
+    required this.onShare,
     required this.onValidate,
     this.onGenerateManifest,
     required this.onRebuildIndex,
@@ -177,6 +238,8 @@ class _LibraryCard extends StatefulWidget {
   final LibraryIndexStatus? indexStatus;
   final ValidationSummary? validation;
   final VoidCallback onOpen;
+  final VoidCallback onExport;
+  final ValueChanged<Rect?> onShare;
   final VoidCallback onValidate;
   final VoidCallback? onGenerateManifest;
   final VoidCallback onRebuildIndex;
@@ -196,11 +259,14 @@ class _LibraryCardState extends State<_LibraryCard> {
     super.dispose();
   }
 
-  void _showMenu(Offset globalPos) {
+  void _showMenu([Offset? globalPos]) {
     _flyout.showFlyout(
       position: globalPos,
       builder: (ctx) => MenuFlyout(
         items: [
+          MenuFlyoutItem(text: const Text('导出资料包'), onPressed: widget.onExport),
+          MenuFlyoutItem(text: const Text('分享资料包'), onPressed: () => widget.onShare(libraryShareOrigin(context))),
+          const MenuFlyoutSeparator(),
           MenuFlyoutItem(
             leading: const Icon(FluentIcons.check_list, size: 14),
             text: const Text('校验文档库'),
@@ -240,6 +306,7 @@ class _LibraryCardState extends State<_LibraryCard> {
         : (dark ? const Color(0x28FFFFFF) : const Color(0x20000000));
 
     final (valLabel, valColor) = _validationBadge(dark);
+    final indexLabel = '向量：${widget.indexStatus?.label ?? '未索引'}';
 
     return FlyoutTarget(
       controller: _flyout,
@@ -293,6 +360,14 @@ class _LibraryCardState extends State<_LibraryCard> {
                       text: lib.format == LibraryFormat.contract ? '契约' : 'Markdown',
                       color: lib.format == LibraryFormat.contract ? accent : theme.resources.textFillColorSecondary,
                     ),
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message: '文档库操作',
+                      child: IconButton(
+                        icon: const Icon(FluentIcons.more, size: 14),
+                        onPressed: _showMenu,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -320,10 +395,13 @@ class _LibraryCardState extends State<_LibraryCard> {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        '向量：${widget.indexStatus?.label ?? '未索引'}',
-                        style: TextStyle(fontSize: 11.5, color: theme.resources.textFillColorSecondary),
-                        overflow: TextOverflow.ellipsis,
+                      child: Tooltip(
+                        message: indexLabel,
+                        child: Text(
+                          indexLabel,
+                          style: TextStyle(fontSize: 11.5, color: theme.resources.textFillColorSecondary),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -463,7 +541,7 @@ class _ImportLibraryCardState extends State<_ImportLibraryCard> {
             children: [
               Icon(FluentIcons.add, size: 26, color: accent),
               const SizedBox(height: 10),
-              Text('导入文档库', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: accent)),
+              Text('从网站制作文档库', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: accent)),
               const SizedBox(height: 4),
               Text(
                 '填写参数生成 Agent 爬取提示词',
@@ -479,9 +557,10 @@ class _ImportLibraryCardState extends State<_ImportLibraryCard> {
 }
 
 class _EmptyHome extends StatelessWidget {
-  const _EmptyHome({required this.onAddRoot, required this.onImport});
+  const _EmptyHome({required this.onAddRoot, required this.onImportPackage, required this.onImport});
 
   final VoidCallback onAddRoot;
+  final VoidCallback onImportPackage;
   final VoidCallback onImport;
 
   @override
@@ -501,17 +580,19 @@ class _EmptyHome extends StatelessWidget {
               Text('还没有文档库', style: theme.typography.subtitle),
               const SizedBox(height: 8),
               Text(
-                '添加已有 Markdown 文件夹所在的库根目录，或生成提示词让 AI Agent 把在线文档站点抓取到本地。',
+                '导入其他设备导出的资料包，或添加本地 Markdown 文档。',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: theme.resources.textFillColorSecondary, height: 1.5),
               ),
               const SizedBox(height: 20),
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 8,
                 children: [
-                  FilledButton(onPressed: onImport, child: const Text('导入文档库')),
-                  const SizedBox(width: 10),
+                  FilledButton(onPressed: onImportPackage, child: const Text('导入资料包')),
                   Button(onPressed: onAddRoot, child: const Text('添加库根目录')),
+                  Button(onPressed: onImport, child: const Text('从网站制作文档库')),
                 ],
               ),
             ],

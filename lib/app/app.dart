@@ -10,6 +10,7 @@ import '../features/library/library_controller.dart';
 import '../features/settings/settings_controller.dart';
 import '../features/settings/settings_model.dart';
 import '../features/window/window_service.dart';
+import 'platform_shells.dart';
 import 'providers.dart';
 import 'shell.dart';
 import 'shortcuts.dart';
@@ -17,7 +18,9 @@ import 'theme.dart';
 
 /// Root Flutter application widget.
 class FlDocApp extends ConsumerStatefulWidget {
-  const FlDocApp({super.key});
+  const FlDocApp({super.key, this.platform});
+
+  final TargetPlatform? platform;
 
   @override
   ConsumerState<FlDocApp> createState() => _FlDocAppState();
@@ -79,7 +82,10 @@ class _FlDocAppState extends ConsumerState<FlDocApp> {
     } catch (_) {}
   }
 
-  bool _onGlobalKey(KeyEvent event) => handleAppShortcut(event, ref);
+  TargetPlatform get _platform => widget.platform ??
+      (Platform.isMacOS ? TargetPlatform.macOS : Platform.isAndroid ? TargetPlatform.android : TargetPlatform.windows);
+
+  bool _onGlobalKey(KeyEvent event) => handleAppShortcut(event, ref, platform: _platform);
 
   void _bindWindow() {
     if (_windowBound) return;
@@ -119,13 +125,19 @@ class _FlDocAppState extends ConsumerState<FlDocApp> {
       }
     });
 
+    final platform = _platform;
+    final accent = switch (platform) {
+      TargetPlatform.macOS => macAccent,
+      TargetPlatform.android => androidAccent,
+      _ => null,
+    };
     return FluentApp(
       title: 'flDoc',
       debugShowCheckedModeBanner: false,
       themeMode: themeModeOf(settings.theme),
-      theme: buildTheme(settings, Brightness.light),
-      darkTheme: buildTheme(settings, Brightness.dark),
-      home: const AppShell(),
+      theme: buildTheme(settings, Brightness.light, defaultAccent: accent),
+      darkTheme: buildTheme(settings, Brightness.dark, defaultAccent: accent),
+      home: AppShell(platform: platform),
     );
   }
 }

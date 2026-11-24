@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:fluent_ui/fluent_ui.dart';
 
 import '../features/settings/settings_model.dart';
@@ -32,14 +34,33 @@ ThemeMode themeModeOf(String v) => switch (v) {
       _ => ThemeMode.system,
     };
 
-FluentThemeData buildTheme(AppSettings s, Brightness brightness) {
-  final accent = parseHexColor(s.accentColor).toAccentColor();
+String? _bodyFont(String name) {
+  if (name.isEmpty) return null;
+  if (name == 'Microsoft YaHei UI') {
+    if (Platform.isMacOS) return 'Helvetica Neue';
+    if (Platform.isAndroid) return 'Roboto';
+  }
+  return name;
+}
+
+String _codeFont(String name) {
+  if (name.isNotEmpty && name != 'Cascadia Code') return name;
+  if (Platform.isMacOS) return 'Menlo';
+  if (Platform.isAndroid) return 'monospace';
+  return name.isEmpty ? 'Consolas' : name;
+}
+
+FluentThemeData buildTheme(AppSettings s, Brightness brightness, {Color? defaultAccent}) {
+  final accent = (defaultAccent != null && s.accentColor.toUpperCase() == '#0078D4'
+          ? defaultAccent
+          : parseHexColor(s.accentColor))
+      .toAccentColor();
   final dark = brightness == Brightness.dark;
   final bg = dark ? const Color(0xFF202020) : const Color(0xFFF3F3F3);
   return FluentThemeData(
     brightness: brightness,
     accentColor: accent,
-    fontFamily: s.bodyFont.isEmpty ? null : s.bodyFont,
+    fontFamily: _bodyFont(s.bodyFont),
     visualDensity: VisualDensity.standard,
     scaffoldBackgroundColor: bg,
     micaBackgroundColor: bg,
@@ -81,15 +102,17 @@ class ReaderStyle {
         fontSize: fontSize,
         height: 1.7,
         color: text,
-        fontFamily: bodyFont.isEmpty ? null : bodyFont,
-        fontFamilyFallback: const ['Microsoft YaHei UI', 'Segoe UI', 'Microsoft YaHei'],
+        fontFamily: _bodyFont(bodyFont),
+        fontFamilyFallback: Platform.isMacOS
+            ? const ['PingFang SC']
+            : const ['Microsoft YaHei UI', 'Segoe UI', 'Microsoft YaHei'],
       );
 
   TextStyle get code => TextStyle(
         fontSize: fontSize * 0.88,
         height: 1.55,
         color: text,
-        fontFamily: codeFont.isEmpty ? 'Consolas' : codeFont,
+        fontFamily: _codeFont(codeFont),
         fontFamilyFallback: const ['Cascadia Mono', 'Consolas', 'Microsoft YaHei UI'],
       );
 

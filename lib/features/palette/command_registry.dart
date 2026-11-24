@@ -13,7 +13,9 @@ import '../../core/paths.dart';
 import '../ai/ai_controller.dart';
 import '../ai/index/embed_indexer.dart';
 import '../ai/ui/ai_config_guard.dart';
+import '../library/android_library_import.dart';
 import '../library/library_controller.dart';
+import '../library/library_transfer.dart';
 import '../library/manifest_generator.dart';
 import '../library/models.dart';
 import '../library/validator/library_validator.dart';
@@ -181,7 +183,7 @@ class PaletteController extends Notifier<PaletteState> {
   @override
   PaletteState build() {
     final oobeDone = ref.read(settingsProvider).oobeCompleted;
-    return PaletteState(showOobe: !oobeDone);
+    return PaletteState(showOobe: !oobeDone && !Platform.isAndroid);
   }
 
   void openRoot() => state = state.copyWith(open: true, stack: const []);
@@ -435,7 +437,7 @@ List<AppCommand> buildAllCommands(Ref providerRef) {
       id: 'search.global',
       category: '搜索',
       title: '全局搜索',
-      description: '使用内置 ripgrep 全文检索',
+      description: '离线检索文档正文、标题与代码',
       keywords: ['search', 'rg', 'ripgrep', 'grep', '全文'],
       run: (ctx, ref) {
         final defScope = ref.read(settingsProvider).defaultScope == 'allLibraries'
@@ -1039,11 +1041,12 @@ List<AppCommand> buildAllCommands(Ref providerRef) {
       category: '首选项',
       title: 'ripgrep 路径',
       keywords: ['rg', 'ripgrep', 'path'],
+      isEnabled: (_) => !Platform.isAndroid,
       currentValue: (r) => r.read(settingsProvider).rgPath.isEmpty ? '内置' : r.read(settingsProvider).rgPath,
       run: (ctx, ref) {
         ref.read(paletteProvider.notifier).pushSubmode(TextInputSubmode(
-              title: 'ripgrep 路径（留空使用内置 rg.exe）',
-              placeholder: '例如 C:\\tools\\rg.exe，留空重置为内置',
+              title: 'ripgrep 路径（留空使用内置程序）',
+              placeholder: Platform.isWindows ? '例如 C:\\tools\\rg.exe' : '例如 /opt/homebrew/bin/rg',
               initialValue: ref.read(settingsProvider).rgPath,
               onSubmit: (_, v) {
                 ref.read(settingsProvider.notifier).set('search.rgPath', v.trim());
@@ -1110,20 +1113,59 @@ List<AppCommand> buildAllCommands(Ref providerRef) {
       run: (ctx, ref) => ref.read(paletteProvider.notifier).openOobe(),
     ),
 
-    // ======================== 2.7 文档库 (8) ========================
+    // ======================== 2.7 文档库 ========================
     AppCommand(
       id: 'library.import',
       category: '文档库',
-      title: '导入文档库',
+      title: '从网站制作文档库',
       description: '填写参数生成 Agent 爬取提示词并复制到剪贴板',
       keywords: ['import', 'crawl', 'prompt', '抓取'],
       run: (ctx, ref) {
         ref.read(paletteProvider.notifier).pushSubmode(const FormSubmode(
-              title: '导入文档库',
+              title: '从网站制作文档库',
               kind: FormModeKind.importLibrary,
             ));
       },
     ),
+    AppCommand(
+      id: 'library.importPackage',
+      category: '文档库',
+      title: '导入资料包',
+      description: '从 .fldoc.zip 导入文档库',
+      keywords: ['import', 'package', 'zip', '导入文档库'],
+      run: (ctx, ref) {
+        final transfer = ref.read(libraryTransferProvider);
+        ref.read(paletteProvider.notifier).close();
+        return transfer.importPackage();
+      },
+    ),
+    for (final share in [false, true])
+      AppCommand(
+        id: share ? 'library.sharePackage' : 'library.exportPackage',
+        category: '文档库',
+        title: share ? '分享资料包' : '导出资料包',
+        keywords: [share ? 'share' : 'export', 'package', 'zip'],
+        isEnabled: (r) => r.read(libraryProvider).libraries.isNotEmpty,
+        run: (ctx, ref) {
+          final transfer = ref.read(libraryTransferProvider);
+          final palette = ref.read(paletteProvider.notifier);
+          palette.pushSubmode(OptionListSubmode(
+            title: share ? '选择要分享的文档库' : '选择要导出的文档库',
+            options: [
+              for (final library in ref.read(libraryProvider).libraries)
+                PaletteOption(
+                  label: library.name,
+                  subtitle: library.dir,
+                  onSelect: (context) {
+                    final origin = share ? libraryShareOrigin(context) : null;
+                    palette.close();
+                    return share ? transfer.sharePackage(library, origin) : transfer.exportPackage(library);
+                  },
+                ),
+            ],
+          ));
+        },
+      ),
     AppCommand(
       id: 'library.validate',
       category: '文档库',
@@ -1209,10 +1251,14 @@ List<AppCommand> buildAllCommands(Ref providerRef) {
     AppCommand(
       id: 'library.addRoot',
       category: '文档库',
-      title: '添加库根目录',
+      title: Platform.isAndroid ? '导入文档文件夹' : '添加库根目录',
       keywords: ['root', 'folder', 'add'],
       run: (ctx, ref) async {
         ref.read(paletteProvider.notifier).close();
+        if (Platform.isAndroid) {
+          await importAndroidLibrary(ref, ctx);
+          return;
+        }
         final dir = await FilePicker.getDirectoryPath(dialogTitle: '选择文档库根目录');
         if (dir == null || dir.trim().isEmpty) return;
         final norm = dir.replaceAll('\\', '/');

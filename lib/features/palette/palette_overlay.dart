@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_ui/material_ui.dart' as m;
 
 import '../../core/debounce.dart';
 import '../../core/paths.dart';
@@ -27,7 +28,9 @@ import 'fuzzy_match.dart';
 
 /// Top-centered floating Command Palette with 5 submodes (doc 05 §1).
 class CommandPaletteOverlay extends ConsumerStatefulWidget {
-  const CommandPaletteOverlay({super.key});
+  const CommandPaletteOverlay({super.key, this.mobile = false});
+
+  final bool mobile;
 
   @override
   ConsumerState<CommandPaletteOverlay> createState() => _CommandPaletteOverlayState();
@@ -298,6 +301,7 @@ class _CommandPaletteOverlayState extends ConsumerState<CommandPaletteOverlay> {
     final maxH = (size.height - 88).clamp(320.0, 580.0);
 
     final items = _buildItems(mode);
+    if (widget.mobile) return BlockSemantics(child: _buildMobile(mode, items, theme));
 
     return Stack(
       children: [
@@ -455,6 +459,95 @@ class _CommandPaletteOverlayState extends ConsumerState<CommandPaletteOverlay> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildMobile(PaletteSubmode? mode, List<_PaletteRowItem> items, FluentThemeData theme) {
+    final colors = m.ColorScheme.fromSeed(
+      seedColor: theme.accentColor.defaultBrushFor(theme.brightness),
+      brightness: theme.brightness,
+    );
+    final ctl = ref.read(paletteProvider.notifier);
+    final title = mode?.title ?? '命令面板';
+    return m.Theme(
+      data: m.ThemeData(colorScheme: colors, useMaterial3: true),
+      child: m.Material(
+        color: colors.surface,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            m.ListTile(
+              leading: m.IconButton(
+                tooltip: '返回',
+                icon: const Icon(m.Icons.arrow_back),
+                onPressed: ref.read(paletteProvider).stack.length > 1 ? ctl.popSubmode : ctl.close,
+              ),
+              title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+            ),
+            if (mode is! FormSubmode && mode is! ConfirmSubmode)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: m.TextField(
+                  key: const ValueKey('palette-input-field'),
+                  controller: _inputCtrl,
+                  focusNode: _inputFocus,
+                  textInputAction: TextInputAction.search,
+                  onChanged: (q) => _onQueryChanged(q, mode),
+                  onSubmitted: (q) {
+                    if (mode is TextInputSubmode) {
+                      _submitText(mode);
+                    } else if (mode is DynamicSubmode && mode.kind == DynamicModeKind.aiSearch) {
+                      _runAiSearch(q);
+                    }
+                  },
+                  decoration: m.InputDecoration(
+                    hintText: mode?.placeholder.isNotEmpty == true ? mode!.placeholder : '搜索命令',
+                    errorText: _inputError,
+                    prefixIcon: const Icon(m.Icons.search),
+                    suffixIcon: _searching
+                        ? const Padding(
+                            padding: EdgeInsets.all(15),
+                            child: SizedBox.square(dimension: 16, child: m.CircularProgressIndicator(strokeWidth: 2)),
+                          )
+                        : m.IconButton(
+                            tooltip: '清空',
+                            icon: const Icon(m.Icons.close),
+                            onPressed: () {
+                              _inputCtrl.clear();
+                              _onQueryChanged('', mode);
+                              _inputFocus.requestFocus();
+                            },
+                          ),
+                    filled: true,
+                    border: m.OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(28),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+            if (mode is DynamicSubmode &&
+                const {DynamicModeKind.globalSearch, DynamicModeKind.symbolSearch, DynamicModeKind.aiSearch, DynamicModeKind.openPage}.contains(mode.kind))
+              _buildChipsRow(mode, theme),
+            if (mode is FormSubmode)
+              Expanded(child: Padding(padding: const EdgeInsets.all(16), child: _buildFormBody(mode.kind)))
+            else if (mode is ConfirmSubmode)
+              Flexible(child: SingleChildScrollView(child: _buildConfirmBody(mode)))
+            else if (mode is TextInputSubmode)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: m.FilledButton(onPressed: () => _submitText(mode), child: const Text('确认')),
+                ),
+              )
+            else
+              Expanded(child: _buildList(items, mode, theme)),
+            if (mode is DynamicSubmode && mode.kind == DynamicModeKind.globalSearch && items.isNotEmpty)
+              _buildFooter(mode, items, theme),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1169,12 +1262,16 @@ class _CommandPaletteOverlayState extends ConsumerState<CommandPaletteOverlay> {
       ),
       child: Row(
         children: [
+          if (widget.mobile)
+            Expanded(child: Text(left, style: TextStyle(fontSize: 12, color: theme.resources.textFillColorSecondary)))
+          else ...[
           Text(left, style: TextStyle(fontSize: 11, color: theme.resources.textFillColorSecondary)),
           const Spacer(),
           Text(
             '↑↓ 选择   Enter 确认   ${mode != null ? 'Backspace 返回   ' : ''}Esc 关闭',
             style: TextStyle(fontSize: 11, color: theme.resources.textFillColorSecondary),
           ),
+          ],
         ],
       ),
     );
@@ -1360,8 +1457,8 @@ class _AboutHelpState extends State<_AboutHelp> {
   @override
   void initState() {
     super.initState();
-    getRgVersion(widget.rgPath).then((v) {
-      if (mounted) setState(() => _rg = v ?? '未检测到');
+    getSearchEngineLabel(widget.rgPath).then((v) {
+      if (mounted) setState(() => _rg = v);
     });
     MermaidRenderer.checkWebView2Version().then((v) {
       if (mounted) setState(() => _wv2 = v ?? '未安装（Mermaid 降级显示源码）');
@@ -1376,9 +1473,9 @@ class _AboutHelpState extends State<_AboutHelp> {
       children: [
         const Text('flDoc 0.1.6', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
-        Text('ripgrep：${_rg ?? '检测中…'}', style: const TextStyle(fontSize: 12.5)),
+        Text('全文搜索引擎：${_rg ?? '检测中…'}', style: const TextStyle(fontSize: 12.5)),
         const SizedBox(height: 4),
-        Text('WebView2：${_wv2 ?? '检测中…'}', style: const TextStyle(fontSize: 12.5)),
+        if (Platform.isWindows) Text('WebView2：${_wv2 ?? '检测中…'}', style: const TextStyle(fontSize: 12.5)),
         const SizedBox(height: 4),
         SelectableText('数据目录：${AppPaths.instance.supportDir}', style: const TextStyle(fontSize: 12)),
       ],

@@ -101,8 +101,8 @@ class AppPaths {
   /// Directory containing the running executable.
   static String get exeDir => p.dirname(Platform.resolvedExecutable);
 
-  /// rg.exe shipped next to the executable.
-  static String get bundledRgPath => p.join(exeDir, 'rg.exe');
+  /// Search executable packaged alongside the app executable.
+  static String get bundledRgPath => p.join(exeDir, Platform.isWindows ? 'rg.exe' : 'rg');
 
   /// Default library root (`%USERPROFILE%\flDocLibrary` on Windows; sandbox-safe Docs/Storage on macOS/Android).
   static String get defaultLibraryRoot => _instance?.defaultLibraryDir ?? _fallbackDefaultLibraryRoot();

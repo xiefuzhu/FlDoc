@@ -7,15 +7,22 @@ import '../features/reader/find/find_controller.dart';
 import '../features/reader/navigation/navigation_controller.dart';
 import '../features/reader/ui/reader_view.dart';
 import '../features/settings/settings_controller.dart';
+import 'platform_shells.dart';
 
 /// Base fixed keyboard shortcuts (doc 05 §3).
 /// Respects text input focus for `Ctrl+B` and `Alt+←/→`.
-bool handleAppShortcut(KeyEvent event, WidgetRef ref) {
+bool handleAppShortcut(KeyEvent event, WidgetRef ref, {required TargetPlatform platform}) {
   if (event is! KeyDownEvent) return false;
   final key = event.logicalKey;
-  final ctrl = HardwareKeyboard.instance.isControlPressed;
+  final mac = platform == TargetPlatform.macOS;
+  final ctrl = mac ? HardwareKeyboard.instance.isMetaPressed : HardwareKeyboard.instance.isControlPressed;
   final shift = HardwareKeyboard.instance.isShiftPressed;
   final alt = HardwareKeyboard.instance.isAltPressed;
+
+  if (mac && ctrl && !shift && !alt && key == LogicalKeyboardKey.keyK) {
+    openPlatformSearch(ref);
+    return true;
+  }
 
   // Ctrl+Shift+P: Command Palette (works everywhere)
   if (ctrl && shift && !alt && key == LogicalKeyboardKey.keyP) {
@@ -80,6 +87,16 @@ bool handleAppShortcut(KeyEvent event, WidgetRef ref) {
   }
 
   // Alt+Left / Alt+Right: Back / Forward
+  if (mac && ctrl && !alt && !shift) {
+    if (key == LogicalKeyboardKey.bracketLeft) {
+      ref.read(navigationProvider.notifier).back();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.bracketRight) {
+      ref.read(navigationProvider.notifier).forward();
+      return true;
+    }
+  }
   if (alt && !ctrl && !shift && key == LogicalKeyboardKey.arrowLeft) {
     ref.read(navigationProvider.notifier).back();
     return true;

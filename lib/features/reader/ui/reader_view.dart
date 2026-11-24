@@ -27,7 +27,9 @@ class ReaderSelectionNotifier extends Notifier<String> {
 
 /// Lazy block-based Markdown document reader (FR-RD-01..14, FR-LK-01..04).
 class ReaderView extends ConsumerStatefulWidget {
-  const ReaderView({super.key});
+  const ReaderView({super.key, this.compact = false});
+
+  final bool compact;
 
   @override
   ConsumerState<ReaderView> createState() => _ReaderViewState();
@@ -238,7 +240,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxW ?? double.infinity),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
+            padding: EdgeInsets.symmetric(horizontal: widget.compact ? 20 : 28),
             child: child,
           ),
         ),
@@ -280,7 +282,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
             },
           ),
         ),
-        const Positioned(top: 10, right: 16, child: FindBar()),
+        Positioned(
+          top: 10,
+          right: 16,
+          width: widget.compact ? (MediaQuery.sizeOf(context).width - 32).clamp(0, 360) : null,
+          child: const FindBar(),
+        ),
       ],
     );
   }
