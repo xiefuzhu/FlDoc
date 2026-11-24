@@ -45,15 +45,17 @@ flutter test
 # 构建 Windows Release（自动将 third_party/ripgrep/rg.exe 复制到 exe 同目录）
 flutter build windows --release
 
-# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.3.exe）
-iscc /DAppVersion=0.1.3 installer\flDoc.iss
+# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.4.exe）
+iscc /DAppVersion=0.1.4 installer\flDoc.iss
 ```
 
 ### GitHub Actions 发布
 
-推送到 `main`、向 `main` 发起 PR，或手动运行 Windows CI and Release，会执行静态分析、测试、Windows x64 构建和打包。每次成功运行都可在 Actions 中下载安装包及 `SHA256SUMS.txt`。
+推送到 `main`、向 `main` 发起 PR，或手动运行 Build and Release，会执行静态分析、测试，并构建 Windows x64 安装程序、Android APK 和 macOS 通用应用 ZIP。各平台产物可从对应的 Actions 任务下载。
 
-发布时先更新 `pubspec.yaml` 的版本、应用内版本显示和安装脚本的默认版本，再提交并推送 `vX.Y.Z` 标签。标签必须与 `pubspec.yaml` 中 `+` 前的版本一致。检查和打包通过后，工作流会自动在 GitHub Releases 发布安装包和 SHA-256 校验文件。
+发布时先更新 `pubspec.yaml` 的版本和构建号、应用内版本显示和安装脚本的默认版本，再提交并推送 `vX.Y.Z` 标签。标签必须与 `pubspec.yaml` 中 `+` 前的版本一致。三个平台通过后，工作流会在同一个 GitHub Release 发布所有产物和 `SHA256SUMS.txt`。
+
+Android APK 使用 CI 的调试密钥签名，不同构建的 APK 可能需要卸载旧版再安装。macOS ZIP 包含适用于 Apple Silicon 和 Intel 的 `flDoc.app`，采用临时签名，未经过 Apple 公证。
 
 ## 设计文档
 

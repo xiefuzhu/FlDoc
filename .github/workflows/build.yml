@@ -1,4 +1,4 @@
-name: Windows CI and Release
+name: Build and Release
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
-  build:
+  windows:
     name: Check and build Windows x64
     runs-on: windows-2022
     timeout-minutes: 30
@@ -90,10 +90,81 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Select JDK 21
+        shell: bash
+        run: |
+          echo "JAVA_HOME=${JAVA_HOME_21_X64:?}" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: '3.50.1'
+          cache: true
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build Android release APK
+        run: flutter build apk --release --no-pub
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: flDoc-android
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          overwrite: true
+
+  macos:
+    name: Build macOS universal app
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: '3.50.1'
+          cache: true
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build macOS release app
+        run: flutter build macos --release --no-pub
+
+      - name: Verify architectures and archive the app
+        shell: bash
+        run: |
+          app=build/macos/Build/Products/Release/flDoc.app
+          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/flDoc"
+          ditto -c -k --sequesterRsrc --keepParent "$app" build/flDoc-macos-universal.zip
+
+      - name: Upload macOS app archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: flDoc-macos-universal
+          path: build/flDoc-macos-universal.zip
+          if-no-files-found: error
+          overwrite: true
+
   publish:
     name: Publish GitHub Release
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: build
+    needs: [windows, android, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -101,10 +172,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: flDoc-windows-x64
+          pattern: flDoc-*
+          merge-multiple: true
           path: release
 
-      - name: Verify and publish the installer
+      - name: Verify and publish all platform packages
         shell: bash
         working-directory: release
         env:
@@ -112,5 +184,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           sha256sum --check SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" "flDoc-Setup-${GITHUB_REF_NAME#v}.exe" SHA256SUMS.txt \
+          version=${GITHUB_REF_NAME#v}
+          apk="flDoc-${version}-android.apk"
+          mac="flDoc-${version}-macos-universal.zip"
+          mv app-release.apk "$apk"
+          mv flDoc-macos-universal.zip "$mac"
+          sha256sum "$apk" "$mac" >> SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" "flDoc-Setup-$version.exe" "$apk" "$mac" SHA256SUMS.txt \
             --verify-tag --title "flDoc $GITHUB_REF_NAME" --generate-notes

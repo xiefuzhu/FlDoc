@@ -1,9 +1,9 @@
 ; flDoc Inno Setup 6 Installer Script
 ; Build Release first: flutter build windows --release
-; Then compile: iscc /DAppVersion=0.1.3 installer\flDoc.iss
+; Then compile: iscc /DAppVersion=0.1.4 installer\flDoc.iss
 
 #ifndef AppVersion
-  #define AppVersion "0.1.3"
+  #define AppVersion "0.1.4"
 #endif
 
 #define AppName "flDoc"
