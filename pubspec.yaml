@@ -1,7 +1,7 @@
 name: fldoc
 description: "flDoc - Offline Markdown documentation reader with AI search and RAG."
 publish_to: 'none'
-version: 0.1.7+5
+version: 0.1.8+6
 
 environment:
   sdk: ^3.14.0

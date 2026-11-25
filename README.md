@@ -55,6 +55,8 @@ flDoc 是一款支持离线阅读、全文与符号检索以及本地 RAG 问答
 
 ## 平台能力说明
 
+Android 使用 Fluent UI。窄屏使用底部导航和单栏阅读，章节目录从底部展开；可用宽度达到 720 dp 时显示桌面式工具栏和可收起的侧栏，达到 960 dp 时可以同时显示目录、正文和问答。
+
 | 能力 | Windows (x64) | macOS (`arm64` / `x86_64`) | Android (`arm64-v8a`) |
 |---|---|---|---|
 | Markdown 阅读、双形态库、中英切换、目录/符号检索 | 支持 | 支持 | 支持 |
@@ -164,8 +166,8 @@ flutter test --no-pub
 # 构建 Windows Release（CMake 会自动将 third_party/ripgrep/rg.exe 复制到 exe 同目录）
 flutter build windows --release
 
-# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.7.exe）
-iscc /DAppVersion=0.1.7 installer\flDoc.iss
+# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.8.exe）
+iscc /DAppVersion=0.1.8 installer\flDoc.iss
 ```
 
 ### macOS（拆分 `arm64` 与 `x86_64`）

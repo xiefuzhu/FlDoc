@@ -20,6 +20,7 @@ import '../features/settings/oobe/oobe_dialog.dart';
 import '../features/settings/settings_controller.dart';
 import '../features/settings/ui/settings_page.dart';
 import '../features/sidebar/sidebar.dart';
+import 'android_shell.dart';
 import 'platform_shells.dart';
 import 'providers.dart';
 
@@ -80,6 +81,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     final android = widget.platform == TargetPlatform.android;
     final mac = widget.platform == TargetPlatform.macOS;
     final viewPadding = MediaQuery.paddingOf(context);
+    final androidWide = android &&
+        MediaQuery.sizeOf(context).width - viewPadding.horizontal >= androidWideLayoutWidth;
 
     // Auto-clear toast notice after 3.5 seconds.
     ref.listen(noticeProvider, (_, next) {
@@ -97,7 +100,7 @@ class _AppShellState extends ConsumerState<AppShell> {
           onImportLibrary: _openImportForm,
           onValidateLibrary: _openValidationFor,
         ),
-      AppView.reader => ReaderView(compact: android),
+      AppView.reader => ReaderView(compact: android && !androidWide),
       AppView.settings => SettingsPage(
           platform: widget.platform,
           onRerunOobe: () => ref.read(paletteProvider.notifier).openOobe(),
@@ -108,6 +111,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (android) {
       body = AndroidShell(
         content: center,
+        wide: androidWide,
         onOpenChatHistory: _openChatHistory,
         onImportFolder: () => importAndroidLibrary(ref, context),
         onImportHelp: _openImportForm,
@@ -181,8 +185,8 @@ class _AppShellState extends ConsumerState<AppShell> {
           if (notice != null)
             Positioned(
               top: android ? viewPadding.top + 54 : mac ? 64 : 46,
-              left: android ? 16 : null,
-              right: 16,
+              left: android && !androidWide ? viewPadding.left + 16 : null,
+              right: android ? viewPadding.right + 16 : 16,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 400),
                 child: InfoBar(
@@ -200,7 +204,7 @@ class _AppShellState extends ConsumerState<AppShell> {
               child: SafeArea(
                 child: Padding(
                   padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-                  child: const CommandPaletteOverlay(mobile: true),
+                  child: CommandPaletteOverlay(mobile: true, wide: androidWide),
                 ),
               ),
             )

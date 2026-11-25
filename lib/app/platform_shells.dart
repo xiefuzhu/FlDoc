@@ -5,10 +5,8 @@ import 'package:material_ui/material_ui.dart' as m;
 import '../features/ai/ai_controller.dart';
 import '../features/ai/ui/ai_panel.dart';
 import '../features/library/library_controller.dart';
-import '../features/library/library_transfer.dart';
 import '../features/library/models.dart';
 import '../features/palette/command_registry.dart';
-import '../features/reader/find/find_controller.dart';
 import '../features/reader/navigation/navigation_controller.dart';
 import '../features/search/models.dart';
 import '../features/settings/settings_controller.dart';
@@ -260,300 +258,16 @@ class _MacRow extends StatelessWidget {
   }
 }
 
-class AndroidShell extends ConsumerWidget {
-  const AndroidShell({
-    super.key,
-    required this.content,
-    required this.onOpenChatHistory,
-    required this.onImportFolder,
-    required this.onImportHelp,
-  });
-
-  final Widget content;
-  final VoidCallback onOpenChatHistory;
-  final VoidCallback onImportFolder;
-  final VoidCallback onImportHelp;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = FluentTheme.of(context);
-    final nav = ref.watch(navigationProvider);
-    final ai = ref.watch(aiControllerProvider.select((s) => s.visible));
-    final palette = ref.watch(paletteProvider.select((s) => s.open));
-    final findOpen = ref.watch(findProvider.select((s) => s.open));
-    final navigation = ref.read(navigationProvider.notifier);
-    final chat = ref.read(aiControllerProvider.notifier);
-    final reading = !ai && nav.view == AppView.reader;
-    final home = !ai && nav.view == AppView.home;
-    final colors = m.ColorScheme.fromSeed(
-      seedColor: theme.accentColor.defaultBrushFor(theme.brightness),
-      brightness: theme.brightness,
-    );
-    ref.listen(navigationProvider.select((s) => (s.view, s.location)), (
-      _,
-      next,
-    ) {
-      if (next.$1 != AppView.home && ref.read(aiControllerProvider).visible) {
-        chat.setVisible(false);
-      }
-    });
-
-    return m.Theme(
-      data: m.ThemeData(colorScheme: colors, useMaterial3: true),
-      child: Builder(
-        builder: (context) => PopScope(
-          canPop: !palette && !ai && nav.view == AppView.home,
-          onPopInvokedWithResult: (didPop, _) {
-            if (didPop) return;
-            if (palette) {
-              ref.read(paletteProvider.notifier).close();
-            } else if (ai) {
-              chat.setVisible(false);
-            } else if (findOpen) {
-              ref.read(findProvider.notifier).close();
-            } else if (nav.canBack) {
-              navigation.back();
-            } else {
-              navigation.goHome(push: false);
-            }
-          },
-          child: m.Scaffold(
-            backgroundColor: colors.surface,
-            appBar: m.AppBar(
-              backgroundColor: colors.surface,
-              automaticallyImplyLeading: false,
-              leading: !ai && !home
-                  ? m.IconButton(
-                      tooltip: '返回',
-                      icon: const Icon(m.Icons.arrow_back),
-                      onPressed: () => nav.canBack
-                          ? navigation.back()
-                          : navigation.goHome(push: false),
-                    )
-                  : null,
-              title: Text(
-                switch ((ai, nav.view)) {
-                  (true, _) => '文档问答',
-                  (_, AppView.home) => 'flDoc',
-                  (_, AppView.settings) => '设置',
-                  (_, AppView.reader) => nav.page?.lib.name ?? '阅读',
-                },
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              actions: [
-                if (reading)
-                  m.IconButton(
-                    tooltip: '章节目录',
-                    onPressed: () => m.showModalBottomSheet<void>(
-                      context: context,
-                      useSafeArea: true,
-                      showDragHandle: true,
-                      isScrollControlled: true,
-                      builder: (sheet) => FractionallySizedBox(
-                        heightFactor: .67,
-                        child: SafeArea(
-                          top: false,
-                          child: DocumentOutline(
-                            compact: false,
-                            onOpenPage: () => Navigator.pop(sheet),
-                          ),
-                        ),
-                      ),
-                    ),
-                    icon: const Icon(m.Icons.format_list_bulleted),
-                  ),
-                m.PopupMenuButton<String>(
-                  tooltip: '更多操作',
-                  onSelected: (action) {
-                    switch (action) {
-                      case 'find':
-                        ref.read(findProvider.notifier).open();
-                      case 'settings':
-                        chat.setVisible(false);
-                        navigation.openSettings();
-                      case 'search':
-                        openPlatformSearch(ref);
-                      case 'chat':
-                        chat.setVisible(true);
-                      case 'commands':
-                        ref.read(paletteProvider.notifier).openRoot();
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    if (reading) ...const [
-                      m.PopupMenuItem(value: 'find', child: Text('页内查找')),
-                      m.PopupMenuItem(value: 'search', child: Text('全文搜索')),
-                      m.PopupMenuItem(value: 'chat', child: Text('文档问答')),
-                    ],
-                    const m.PopupMenuItem(
-                      value: 'commands',
-                      child: Text('命令面板'),
-                    ),
-                    if (nav.view != AppView.settings || ai)
-                      const m.PopupMenuItem(
-                        value: 'settings',
-                        child: Text('设置'),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-            body: SafeArea(
-              top: false,
-              bottom: reading || (!ai && nav.view == AppView.settings),
-              child: ai
-                  ? AiPanel(onOpenHistory: onOpenChatHistory, embedded: true)
-                  : home
-                  ? _AndroidLibrary(
-                      onImportFolder: onImportFolder,
-                      onImportHelp: onImportHelp,
-                    )
-                  : content,
-            ),
-            bottomNavigationBar: home || ai
-                ? m.NavigationBar(
-                    selectedIndex: ai ? 2 : 0,
-                    onDestinationSelected: (index) {
-                      switch (index) {
-                        case 0:
-                          chat.setVisible(false);
-                          navigation.goHome();
-                        case 1:
-                          openPlatformSearch(ref);
-                        case 2:
-                          chat.setVisible(true);
-                      }
-                    },
-                    destinations: const [
-                      m.NavigationDestination(
-                        icon: Icon(m.Icons.library_books_outlined),
-                        label: '文档库',
-                      ),
-                      m.NavigationDestination(
-                        icon: Icon(m.Icons.search),
-                        label: '搜索',
-                      ),
-                      m.NavigationDestination(
-                        icon: Icon(m.Icons.chat_bubble_outline),
-                        label: '问答',
-                      ),
-                    ],
-                  )
-                : null,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AndroidLibrary extends ConsumerWidget {
-  const _AndroidLibrary({
-    required this.onImportFolder,
-    required this.onImportHelp,
-  });
-
-  final VoidCallback onImportFolder;
-  final VoidCallback onImportHelp;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(libraryProvider);
-    final theme = m.Theme.of(context);
-    final transfer = ref.read(libraryTransferProvider);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 13, 20, 24),
-      children: [
-        Text(
-          '文档库',
-          style: theme.textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          state.libraries.isEmpty
-              ? '导入其他设备导出的资料包，或选择本地 Markdown 文件夹。'
-              : '${state.libraries.length} 个本地文档库',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            m.FilledButton.icon(
-              onPressed: transfer.importPackage,
-              icon: const Icon(m.Icons.file_download_outlined),
-              label: const Text('导入资料包'),
-            ),
-            m.OutlinedButton.icon(
-              onPressed: onImportFolder,
-              icon: const Icon(m.Icons.folder_open),
-              label: const Text('导入文件夹'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 20),
-        if (state.loading && !state.loadedOnce)
-          const Center(child: m.CircularProgressIndicator())
-        else
-          for (final lib in state.libraries)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: m.Card.filled(
-                margin: EdgeInsets.zero,
-                child: m.ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 15,
-                    vertical: 7,
-                  ),
-                  leading: Icon(
-                    m.Icons.menu_book_outlined,
-                    color: theme.colorScheme.primary,
-                  ),
-                  title: Text(lib.name),
-                  subtitle: Text(
-                    '${lib.defaultVersion.label} · ${lib.pageCount} 页',
-                  ),
-                  trailing: m.PopupMenuButton<bool>(
-                    tooltip: '文档库操作',
-                    onSelected: (share) {
-                      if (share) {
-                        transfer.sharePackage(lib, null);
-                      } else {
-                        transfer.exportPackage(lib);
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      m.PopupMenuItem(value: false, child: Text('导出资料包')),
-                      m.PopupMenuItem(value: true, child: Text('分享资料包')),
-                    ],
-                  ),
-                  onTap: () =>
-                      ref.read(navigationProvider.notifier).openLibrary(lib),
-                ),
-              ),
-            ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: m.TextButton(
-            onPressed: onImportHelp,
-            child: const Text('从网站制作文档库'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class DocumentOutline extends ConsumerWidget {
-  const DocumentOutline({super.key, required this.compact, this.onOpenPage});
+  const DocumentOutline({
+    super.key,
+    required this.compact,
+    this.touch = false,
+    this.onOpenPage,
+  });
 
   final bool compact;
+  final bool touch;
   final VoidCallback? onOpenPage;
 
   @override
@@ -585,18 +299,15 @@ class DocumentOutline extends ConsumerWidget {
       if (compact) ...[
         caption('本地文档库'),
         for (final item in libraries)
-          _MacRow(
-            icon: m.Icons.book_outlined,
+          _row(
+            icon: touch ? FluentIcons.library : m.Icons.book_outlined,
             label: item.name,
             selected: nav.view == AppView.reader && lib?.key == item.key,
             onTap: () => navigation.openLibrary(item),
           ),
       ],
       if (nav.view == AppView.reader && lib != null && version != null) ...[
-        if (compact)
-          caption('章节目录')
-        else
-          m.ListTile(title: Text(lib.name), subtitle: const Text('章节目录')),
+        if (compact) caption('章节目录') else caption(lib.name),
         if (lib.versions.length > 1)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -619,11 +330,12 @@ class DocumentOutline extends ConsumerWidget {
               child: caption(node.title),
             )
           else
-            _pageRow(
-              node.title,
-              depth,
+            _row(
+              icon: touch ? FluentIcons.document : m.Icons.description_outlined,
+              label: node.title,
+              indent: depth.clamp(0, 5) * 9.0,
               selected: node.page == location?.page,
-              open: () {
+              onTap: () {
                 onOpenPage?.call();
                 navigation.open(
                   DocLocation(
@@ -645,28 +357,28 @@ class DocumentOutline extends ConsumerWidget {
     );
   }
 
-  Widget _pageRow(
-    String title,
-    int depth, {
+  Widget _row({
+    required IconData icon,
+    required String label,
+    double indent = 0,
     required bool selected,
-    required VoidCallback open,
+    required VoidCallback onTap,
   }) {
-    final indent = depth.clamp(0, 5) * 9.0;
-    if (compact) {
+    if (!touch) {
       return _MacRow(
-        icon: m.Icons.description_outlined,
-        label: title,
+        icon: icon,
+        label: label,
         indent: indent,
         selected: selected,
-        onTap: open,
+        onTap: onTap,
       );
     }
-    return m.ListTile(
+    return ListTile.selectable(
       selected: selected,
-      contentPadding: EdgeInsets.only(left: 12 + indent, right: 12),
-      leading: const Icon(m.Icons.description_outlined),
-      title: Text(title),
-      onTap: open,
+      contentPadding: EdgeInsets.fromLTRB(10 + indent, 12, 8, 12),
+      leading: Icon(icon, size: 16),
+      title: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+      onPressed: onTap,
     );
   }
 }

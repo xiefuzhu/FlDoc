@@ -645,7 +645,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _SectionTitle('关于 flDoc'),
-        const _SettingTile(title: 'flDoc', subtitle: '离线 Markdown 文档阅读器 · 版本 0.1.7'),
+        const _SettingTile(title: 'flDoc', subtitle: '离线 Markdown 文档阅读器 · 版本 0.1.8'),
         _SettingTile(
           title: '全文搜索引擎',
           subtitle: _rgVersion ?? '检测中…',
