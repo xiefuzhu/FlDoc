@@ -24,7 +24,7 @@ flDoc 是一款支持离线阅读、全文与符号检索以及本地 RAG 问答
   xattr -cr /Applications/flDoc.app
   ```
   或在「系统设置 → 隐私与安全性」中点击允许打开。
-- **Android**：支持 `arm64-v8a`（ARMv8 64 位）设备。由临时调试密钥签名的旧版需要一次性迁移到使用正式发布密钥签名的版本。
+- **Android**：支持 `arm64-v8a`（ARMv8 64 位）设备。从 v0.1.9 开始使用固定的正式发布密钥。由临时调试密钥签名的旧版需要一次性迁移。
   - 卸载旧版前，把每个文档库用「导出资料包」保存到下载目录、电脑等独立位置，并确认备份能打开。没有导出入口的版本可以复制原始 Markdown 文档库目录及其资源与清单。
   - 卸载会移除应用私有数据及应用专属目录中的导入副本。资料包保存文档库，应用设置、AI 密钥和聊天记录需单独处理。
   - 安装正式签名版后，从「导入资料包」恢复文档库。后续版本沿用同一发布密钥，支持直接覆盖更新。
@@ -169,8 +169,8 @@ flutter test --no-pub
 # 构建 Windows Release（CMake 会自动将 third_party/ripgrep/rg.exe 复制到 exe 同目录）
 flutter build windows --release
 
-# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.8.exe）
-iscc /DAppVersion=0.1.8 installer\flDoc.iss
+# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.9.exe）
+iscc /DAppVersion=0.1.9 installer\flDoc.iss
 ```
 
 ### macOS（拆分 `arm64` 与 `x86_64`）
