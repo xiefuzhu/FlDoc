@@ -8,13 +8,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/log.dart';
 import '../../library/library_controller.dart';
+import '../../library/manifest_parser.dart';
 import '../../library/models.dart';
 import '../../settings/credential_store.dart';
 import '../../settings/settings_controller.dart';
 import '../chunker.dart';
 import '../client/openai_client.dart';
 
-enum IndexStateKind { unconfigured, idle, indexing, ready, staleModel, failed }
+enum IndexStateKind { unconfigured, idle, indexing, incomplete, ready, staleModel, failed }
+
+enum _IndexRequest { automatic, manual, rebuild }
 
 class LibraryIndexStatus {
   const LibraryIndexStatus({
@@ -36,6 +39,7 @@ class LibraryIndexStatus {
         IndexStateKind.unconfigured => '未配置嵌入模型',
         IndexStateKind.idle => '待索引',
         IndexStateKind.indexing => '索引中 $percent%',
+        IndexStateKind.incomplete => '未完成（$indexed/$total 块）',
         IndexStateKind.ready => '已就绪（$total 块）',
         IndexStateKind.staleModel => '模型已变更，需重建',
         IndexStateKind.failed => '失败（${error ?? '未知错误'}）',
@@ -137,20 +141,19 @@ final embedIndexerProvider = NotifierProvider<EmbedIndexer, Map<String, LibraryI
 /// Incremental background vector indexer backed by SQLite `chunk` table (doc 06 §6).
 class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
   final OpenAiClient _client = OpenAiClient();
-  bool _running = false;
-  final Set<String> _queuedLibs = {};
+  final _queuedLibs = <String, _IndexRequest>{};
+  Future<void>? _drainFuture;
+  ({int generation, String modelKey, bool configured})? _scope;
+  bool _autoIndex = false;
 
   @override
   Map<String, LibraryIndexStatus> build() {
-    ref.listen(libraryProvider.select((s) => s.generation), (_, _) => _onLibrariesUpdated());
+    ref.listen(libraryProvider.select((s) => s.generation), (_, _) => _syncStatuses());
     ref.listen(
-      settingsProvider.select((s) => '${s.embedBaseUrl}|${s.embedModel}|${s.autoIndex}'),
-      (_, _) => refreshStatuses(),
+      settingsProvider.select((s) => (s.embedBaseUrl, s.embedModel, s.autoIndex)),
+      (_, _) => _syncStatuses(),
     );
-    Future.microtask(() {
-      refreshStatuses();
-      _onLibrariesUpdated();
-    });
+    Future.microtask(_syncStatuses);
     return const {};
   }
 
@@ -165,63 +168,35 @@ class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
     return '${OpenAiClient.normalizeBaseUrl(s.embedBaseUrl)}::${s.embedModel.trim()}';
   }
 
-  /// Refreshes status badges from SQLite without making network requests.
-  void refreshStatuses() {
-    final libs = ref.read(libraryProvider).libraries;
+  /// Rechecks configuration after the embedding credential has been saved or removed.
+  void refreshStatuses() => _syncStatuses(retryFailed: true);
+
+  void _syncStatuses({bool retryFailed = false}) {
+    if (!ref.mounted) return;
+    final catalog = ref.read(libraryProvider);
     final configured = isConfigured;
-    final db = ref.read(databaseProvider);
-    final modelKey = _currentModelKey();
-    final next = <String, LibraryIndexStatus>{};
+    final scope = (generation: catalog.generation, modelKey: _currentModelKey(), configured: configured);
+    final scopeChanged = _scope != scope;
+    _scope = scope;
+    final autoIndex = ref.read(settingsProvider).autoIndex;
+    final autoEnabled = autoIndex && !_autoIndex;
+    _autoIndex = autoIndex;
 
-    for (final lib in libs) {
-      final existing = state[lib.key];
-      if (existing != null && existing.kind == IndexStateKind.indexing) {
-        next[lib.key] = existing;
-        continue;
-      }
-      if (!configured) {
-        next[lib.key] = const LibraryIndexStatus(kind: IndexStateKind.unconfigured);
-        continue;
-      }
-      final rs = db.db.select(
-        'SELECT embed_model, COUNT(*) AS cnt FROM chunk WHERE lib_id=? GROUP BY embed_model',
-        [lib.key],
-      );
-      if (rs.isEmpty) {
-        next[lib.key] = const LibraryIndexStatus(kind: IndexStateKind.idle);
-      } else {
-        var matching = 0;
-        var stale = 0;
-        for (final row in rs) {
-          final m = row['embed_model'] as String? ?? '';
-          final c = (row['cnt'] as num?)?.toInt() ?? 0;
-          if (m == modelKey) {
-            matching += c;
-          } else {
-            stale += c;
-          }
-        }
-        if (stale > 0 && matching == 0) {
-          next[lib.key] = LibraryIndexStatus(kind: IndexStateKind.staleModel, total: stale);
-        } else if (matching > 0) {
-          next[lib.key] = LibraryIndexStatus(kind: IndexStateKind.ready, indexed: matching, total: matching);
-        } else {
-          next[lib.key] = const LibraryIndexStatus(kind: IndexStateKind.idle);
-        }
+    if (scopeChanged) {
+      final initial = configured
+          ? const LibraryIndexStatus()
+          : const LibraryIndexStatus(kind: IndexStateKind.unconfigured);
+      state = {for (final lib in catalog.libraries) lib.key: initial};
+    }
+    if (!configured) return;
+    for (final lib in catalog.libraries) {
+      final kind = state[lib.key]?.kind;
+      if (scopeChanged || (autoEnabled && kind != IndexStateKind.ready) ||
+          (retryFailed && autoIndex && kind == IndexStateKind.failed)) {
+        _queuedLibs.putIfAbsent(lib.key, () => _IndexRequest.automatic);
       }
     }
-    state = next;
-  }
-
-  void _onLibrariesUpdated() {
-    refreshStatuses();
-    final s = ref.read(settingsProvider);
-    if (!s.autoIndex || !isConfigured) return;
-    final libs = ref.read(libraryProvider).libraries;
-    for (final lib in libs) {
-      _queuedLibs.add(lib.key);
-    }
-    _drainQueue();
+    if (_queuedLibs.isNotEmpty) unawaited(_drainQueue());
   }
 
   /// Estimates total chunks across [libs] (used to confirm when > 20,000 chunks).
@@ -238,7 +213,10 @@ class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
   }
 
   static Future<List<DocChunk>> _chunkVersionInIsolate(Library lib, LibraryVersion version) {
-    return Isolate.run(() => DocChunker.chunkVersion(lib, version));
+    return Isolate.run(() {
+      if (lib.format == LibraryFormat.contract && version.pages.isEmpty) loadPageMetas(version);
+      return DocChunker.chunkVersion(lib, version, strict: true);
+    });
   }
 
   static Future<List<VectorSearchHit>> _scoreVectorsInIsolate(
@@ -273,10 +251,7 @@ class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
       state = {...state, lib.key: const LibraryIndexStatus(kind: IndexStateKind.unconfigured)};
       return;
     }
-    if (forceRebuild) {
-      ref.read(databaseProvider).db.execute('DELETE FROM chunk WHERE lib_id=?', [lib.key]);
-    }
-    _queuedLibs.add(lib.key);
+    _enqueueManual(lib, forceRebuild);
     await _drainQueue();
   }
 
@@ -285,95 +260,114 @@ class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
       refreshStatuses();
       return;
     }
-    if (forceRebuild) {
-      ref.read(databaseProvider).db.execute('DELETE FROM chunk');
-    }
     for (final lib in libs) {
-      _queuedLibs.add(lib.key);
+      _enqueueManual(lib, forceRebuild);
     }
     await _drainQueue();
   }
 
-  Future<void> _drainQueue() async {
-    if (_running) return;
-    _running = true;
-    try {
-      while (_queuedLibs.isNotEmpty) {
-        final libKey = _queuedLibs.first;
-        _queuedLibs.remove(libKey);
-        final lib = ref.read(libraryProvider).byKey(libKey);
-        if (lib == null) continue;
-        await _indexOne(lib);
-      }
-    } finally {
-      _running = false;
+  void _enqueueManual(Library lib, bool forceRebuild) {
+    if (_queuedLibs[lib.key] == _IndexRequest.rebuild) return;
+    _queuedLibs[lib.key] = forceRebuild ? _IndexRequest.rebuild : _IndexRequest.manual;
+  }
+
+  Future<void> _drainQueue() => _drainFuture ??= Future<void>.microtask(_runQueue).whenComplete(() {
+    _drainFuture = null;
+  });
+
+  Future<void> _runQueue() async {
+    while (ref.mounted && _queuedLibs.isNotEmpty) {
+      final libKey = _queuedLibs.keys.first;
+      final request = _queuedLibs.remove(libKey)!;
+      final lib = ref.read(libraryProvider).byKey(libKey);
+      if (lib != null && _scope?.configured == true) await _indexOne(lib, request);
     }
   }
 
-  Future<void> _indexOne(Library lib) async {
+  Future<void> _indexOne(Library lib, _IndexRequest request) async {
     final s = ref.read(settingsProvider);
     final apiKey = ref.read(credentialStoreProvider).read(CredentialStore.embeddingTarget) ?? '';
     if (s.embedBaseUrl.trim().isEmpty || s.embedModel.trim().isEmpty || apiKey.trim().isEmpty) {
       state = {...state, lib.key: const LibraryIndexStatus(kind: IndexStateKind.unconfigured)};
       return;
     }
-    final modelKey = _currentModelKey();
-    final db = ref.read(databaseProvider);
+    final scope = _scope!;
+    final modelKey = scope.modelKey;
+    final db = ref.read(databaseProvider).db;
+    final allowEmbedding = request != _IndexRequest.automatic || s.autoIndex;
+    var completed = 0;
+    var total = 0;
+    if (allowEmbedding) {
+      state = {...state, lib.key: const LibraryIndexStatus(kind: IndexStateKind.indexing)};
+    }
 
     try {
       final version = lib.defaultVersion;
       final chunks = await _chunkVersionInIsolate(lib, version);
+      if (!ref.mounted || _scope != scope) return;
 
-      // Purge chunks built with a different embedding model.
-      db.db.execute('DELETE FROM chunk WHERE lib_id=? AND version_id=? AND embed_model != ?',
-          [lib.key, version.id, modelKey]);
+      if (request == _IndexRequest.rebuild) {
+        db.execute('DELETE FROM chunk WHERE lib_id=?', [lib.key]);
+      }
 
-      // Fetch existing keys for this (lib, version, model).
-      final existingRows = db.db.select(
+      final existingRows = db.select(
         'SELECT id, page_path, lang, anchor, content_hash FROM chunk WHERE lib_id=? AND version_id=? AND embed_model=?',
         [lib.key, version.id, modelKey],
       );
-      final existingMap = <String, int>{};
-      for (final row in existingRows) {
-        final k = '${row['page_path']}|${row['lang']}|${row['anchor']}|${row['content_hash']}';
-        existingMap[k] = (row['id'] as num).toInt();
-      }
+      final existingMap = {
+        for (final row in existingRows)
+          (row['page_path'], row['lang'], row['anchor'], row['content_hash']): row['id'],
+      };
 
-      final wantedKeys = <String>{};
+      final wantedKeys = <(String, String, String, String)>{};
       final pending = <DocChunk>[];
       for (final ch in chunks) {
-        final k = '${ch.page}|${ch.lang}|${ch.anchor}|${ch.contentHash}';
-        wantedKeys.add(k);
-        if (!existingMap.containsKey(k)) {
-          pending.add(ch);
+        final key = (ch.page, ch.lang, ch.anchor, ch.contentHash);
+        if (wantedKeys.add(key) && !existingMap.containsKey(key)) pending.add(ch);
+      }
+      total = wantedKeys.length;
+      completed = total - pending.length;
+
+      if (allowEmbedding) {
+        db.execute('DELETE FROM chunk WHERE lib_id=? AND version_id=? AND embed_model != ?',
+            [lib.key, version.id, modelKey]);
+        for (final e in existingMap.entries) {
+          if (!wantedKeys.contains(e.key)) db.execute('DELETE FROM chunk WHERE id=?', [e.value]);
         }
       }
 
-      // Delete obsolete chunks.
-      for (final e in existingMap.entries) {
-        if (!wantedKeys.contains(e.key)) {
-          db.db.execute('DELETE FROM chunk WHERE id=?', [e.value]);
-        }
-      }
-
-      final alreadyDone = chunks.length - pending.length;
       if (pending.isEmpty) {
         state = {
           ...state,
-          lib.key: LibraryIndexStatus(kind: IndexStateKind.ready, indexed: chunks.length, total: chunks.length),
+          lib.key: LibraryIndexStatus(kind: IndexStateKind.ready, indexed: completed, total: total),
+        };
+        return;
+      }
+
+      if (!allowEmbedding) {
+        final staleModel = completed == 0 && db.select(
+          'SELECT 1 FROM chunk WHERE lib_id=? AND version_id=? AND embed_model != ? LIMIT 1',
+          [lib.key, version.id, modelKey],
+        ).isNotEmpty;
+        final kind = staleModel
+            ? IndexStateKind.staleModel
+            : completed > 0 ? IndexStateKind.incomplete : IndexStateKind.idle;
+        state = {
+          ...state,
+          lib.key: LibraryIndexStatus(kind: kind, indexed: completed, total: total),
         };
         return;
       }
 
       state = {
         ...state,
-        lib.key: LibraryIndexStatus(kind: IndexStateKind.indexing, indexed: alreadyDone, total: chunks.length),
+        lib.key: LibraryIndexStatus(kind: IndexStateKind.indexing, indexed: completed, total: total),
       };
 
       final batchSize = s.embedBatchSize.clamp(1, 128);
-      var completed = alreadyDone;
 
       for (var i = 0; i < pending.length; i += batchSize) {
+        if (!ref.mounted || _scope != scope) return;
         final batch = pending.sublist(i, math.min(i + batchSize, pending.length));
         final resp = await _embedWithRetry(
           baseUrl: s.embedBaseUrl,
@@ -381,10 +375,11 @@ class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
           model: s.embedModel,
           inputs: batch.map((c) => c.embedText).toList(),
         );
+        if (!ref.mounted || _scope != scope) return;
         final now = DateTime.now().millisecondsSinceEpoch;
-        db.db.execute('BEGIN');
+        db.execute('BEGIN');
         try {
-          final stmt = db.db.prepare('''
+          final stmt = db.prepare('''
             INSERT OR REPLACE INTO chunk
               (lib_id, version_id, page_path, lang, anchor, breadcrumb, text, content_hash, embed_model, dim, vector, updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
@@ -411,26 +406,30 @@ class EmbedIndexer extends Notifier<Map<String, LibraryIndexStatus>> {
           } finally {
             stmt.close();
           }
-          db.db.execute('COMMIT');
+          db.execute('COMMIT');
         } catch (e) {
-          db.db.execute('ROLLBACK');
+          db.execute('ROLLBACK');
           rethrow;
         }
 
         completed += batch.length;
         state = {
           ...state,
-          lib.key: LibraryIndexStatus(kind: IndexStateKind.indexing, indexed: completed, total: chunks.length),
+          lib.key: LibraryIndexStatus(kind: IndexStateKind.indexing, indexed: completed, total: total),
         };
       }
 
       state = {
         ...state,
-        lib.key: LibraryIndexStatus(kind: IndexStateKind.ready, indexed: chunks.length, total: chunks.length),
+        lib.key: LibraryIndexStatus(kind: IndexStateKind.ready, indexed: completed, total: total),
       };
     } catch (e, st) {
       Log.error('embed index failed for ${lib.key}', e, st);
-      state = {...state, lib.key: LibraryIndexStatus(kind: IndexStateKind.failed, error: e.toString())};
+      if (!ref.mounted || _scope != scope) return;
+      state = {
+        ...state,
+        lib.key: LibraryIndexStatus(kind: IndexStateKind.failed, indexed: completed, total: total, error: e.toString()),
+      };
     }
   }
 

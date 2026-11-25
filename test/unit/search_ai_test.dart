@@ -143,6 +143,139 @@ void main() {
     expect(dotProduct(vec, vec), closeTo(1.0, 1e-5));
   });
 
+  test('oversized details and code blocks keep their full text in bounded chunks', () {
+    final longWord = '字😀' * 2200;
+    final code = '  print(123);\n' * 400;
+    final doc = MdParser.parse(
+      '## Section\n\n<details>\n<summary>Start</summary>\n\n${longWord}details-tail\n</details>\n\n'
+      '```dart\n${code}code-tail\n```',
+    );
+    final chunks = DocChunker.chunkDocument(
+      libKey: 'library',
+      libName: 'Library',
+      versionId: 'latest',
+      page: 'page.md',
+      pageTitle: 'Page',
+      lang: 'zh',
+      doc: doc,
+    );
+
+    expect(chunks.length, greaterThan(6));
+    expect(chunks.every((chunk) => chunk.embedText.length <= DocChunker.maxChunkChars), isTrue);
+    expect(chunks.every((chunk) => chunk.anchor == 'section' && !chunk.embedText.runes.contains(0xfffd)), isTrue);
+    final display = chunks.map((chunk) => chunk.displayText).join();
+    expect(display, contains('${longWord}details-tail'));
+    expect(display, contains('${code}code-tail'));
+  });
+
+  test('a failed embedding batch stays incomplete after restart and can resume', () async {
+    final temp = Directory.systemTemp.createTempSync('fldoc_resume_');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    AppPaths.setForTest(temp.path);
+    final root = Directory(p.join(temp.path, 'libraries', 'fixture'))..createSync(recursive: true);
+    final page = File(p.join(root.path, 'page.md'));
+    page.writeAsStringSync([
+      for (var i = 0; i < 3; i++) '## Section $i\n\n${'word $i ' * 140}',
+    ].join('\n\n'));
+
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    var requests = 0;
+    var rejectBatch = true;
+    const error = '输入文本超过模型限制';
+    server.listen((request) async {
+      await request.drain<void>();
+      requests++;
+      final reject = rejectBatch && requests == 2;
+      request.response
+        ..statusCode = reject ? 400 : 200
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode(reject ? {'code': 20001, 'message': error} : {
+          'data': [{'index': 0, 'embedding': [1.0]}],
+        }));
+      await request.response.close();
+    });
+
+    final database = AppDatabase.open(AppPaths.instance.dbFile);
+    final store = SettingsStore(AppPaths.instance.settingsFile);
+    final creds = MemoryCredentialStore()..write(CredentialStore.embeddingTarget, 'dummy');
+    addTearDown(() {
+      store.dispose();
+      database.close();
+    });
+    store.save(AppSettings.defaultSettings().copyWithMany({
+      'libraryRoots': [root.parent.path],
+      'ai.embedding.baseUrl': 'http://127.0.0.1:${server.port}/v1',
+      'ai.embedding.batchSize': 1,
+    }));
+
+    ProviderContainer open() => ProviderContainer(overrides: [
+      databaseProvider.overrideWithValue(database),
+      settingsStoreProvider.overrideWithValue(store),
+      credentialStoreProvider.overrideWithValue(creds),
+    ]);
+
+    Future<LibraryIndexStatus> waitFor(ProviderContainer container, IndexStateKind kind) async {
+      for (var i = 0; i < 250; i++) {
+        final status = container.read(embedIndexerProvider)['fixture'];
+        if (status?.kind == kind) return status!;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      fail('Expected $kind, got ${container.read(embedIndexerProvider)['fixture']?.label}');
+    }
+
+    final first = open();
+    try {
+      final status = await waitFor(first, IndexStateKind.failed);
+      expect(status.error, contains('HTTP 400'));
+      expect(status.error, contains(error));
+      expect(status.indexed, 1);
+      expect(status.total, 3);
+      // Turn off background embedding so a restart can verify coverage without network calls.
+      first.read(settingsProvider.notifier).set('ai.embedding.autoIndex', false);
+      first.read(embedIndexerProvider.notifier).refreshStatuses();
+      expect(first.read(embedIndexerProvider)['fixture']?.kind, IndexStateKind.failed);
+    } finally {
+      first.dispose();
+    }
+
+    final second = open();
+    try {
+      final partial = await waitFor(second, IndexStateKind.incomplete);
+      expect(partial.indexed, 1);
+      expect(partial.total, 3);
+      expect(requests, 2);
+      rejectBatch = false;
+      final lib = second.read(libraryProvider).libraries.single;
+      await second.read(embedIndexerProvider.notifier).indexLibrary(lib);
+      final ready = second.read(embedIndexerProvider)['fixture']!;
+      expect(ready.kind, IndexStateKind.ready);
+      expect(ready.indexed, 3);
+      expect(requests, 4);
+    } finally {
+      second.dispose();
+    }
+
+    final third = open();
+    try {
+      expect((await waitFor(third, IndexStateKind.ready)).indexed, 3);
+      expect(requests, 4);
+    } finally {
+      third.dispose();
+    }
+
+    page.writeAsStringSync(page.readAsStringSync().replaceAll('word 2', 'edit 2'));
+    final edited = open();
+    try {
+      final partial = await waitFor(edited, IndexStateKind.incomplete);
+      expect(partial.indexed, 2);
+      expect(partial.total, 3);
+      expect(requests, 4);
+    } finally {
+      edited.dispose();
+    }
+  });
+
   test('OpenAiClient mock server (models, embeddings, SSE reasoningEffort, 401) & ChatHistoryRepo', () async {
     Map<String, dynamic>? lastChatBody;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

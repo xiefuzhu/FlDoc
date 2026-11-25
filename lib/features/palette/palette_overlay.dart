@@ -1471,7 +1471,7 @@ class _AboutHelpState extends State<_AboutHelp> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('flDoc 0.1.6', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        const Text('flDoc 0.1.7', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Text('全文搜索引擎：${_rg ?? '检测中…'}', style: const TextStyle(fontSize: 12.5)),
         const SizedBox(height: 4),

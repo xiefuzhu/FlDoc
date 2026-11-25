@@ -98,8 +98,9 @@ class OpenAiClient {
       final resp = await client
           .get(Uri.parse('$base/models'), headers: _headers(apiKey))
           .timeout(const Duration(seconds: 15));
-      _checkStatus(resp.statusCode, resp.body);
-      final decoded = jsonDecode(resp.body);
+      final responseBody = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      _checkStatus(resp.statusCode, responseBody);
+      final decoded = jsonDecode(responseBody);
       final data = decoded is Map ? decoded['data'] : null;
       if (data is! List) {
         throw const AiException(AiErrorKind.invalidResponse, '模型列表响应格式无效');
@@ -148,8 +149,9 @@ class OpenAiClient {
       final resp = await client
           .post(Uri.parse('$base/chat/completions'), headers: _headers(apiKey), body: body)
           .timeout(timeout);
-      _checkStatus(resp.statusCode, resp.body);
-      final decoded = jsonDecode(resp.body);
+      final responseBody = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      _checkStatus(resp.statusCode, responseBody);
+      final decoded = jsonDecode(responseBody);
       final choices = decoded is Map ? decoded['choices'] : null;
       if (choices is List && choices.isNotEmpty) {
         final msg = choices.first is Map ? choices.first['message'] : null;
@@ -329,8 +331,9 @@ class OpenAiClient {
             }),
           )
           .timeout(const Duration(seconds: 60));
-      _checkStatus(resp.statusCode, resp.body);
-      final decoded = jsonDecode(resp.body);
+      final responseBody = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      _checkStatus(resp.statusCode, responseBody);
+      final decoded = jsonDecode(responseBody);
       final data = decoded is Map ? decoded['data'] : null;
       if (data is! List || data.length != inputs.length) {
         throw const AiException(AiErrorKind.invalidResponse, '嵌入接口返回的向量数量与输入不一致');
@@ -391,13 +394,35 @@ class OpenAiClient {
     if (status >= 500) {
       throw AiException(AiErrorKind.server, '服务端错误（HTTP $status），请稍后重试', statusCode: status);
     }
-    String detail = '';
+    final detail = _errorDetail(status, body);
+    throw AiException(AiErrorKind.invalidResponse, '请求失败（HTTP $status）$detail', statusCode: status);
+  }
+
+  String _errorDetail(int status, String body) {
+    String? message;
     try {
       final j = jsonDecode(body);
-      if (j is Map && j['error'] is Map && j['error']['message'] is String) {
-        detail = '：${j['error']['message']}';
+      if (j is Map) {
+        final error = j['error'];
+        final detail = j['detail'];
+        final candidates = [
+          if (error is Map) error['message'],
+          j['message'],
+          error,
+          detail,
+          if (detail is List) ...detail.whereType<Map>().map((item) => item['msg']),
+        ];
+        message = candidates.whereType<String>().firstWhere((s) => s.trim().isNotEmpty, orElse: () => '');
+      } else if (j is String) {
+        message = j;
       }
-    } catch (_) {}
-    throw AiException(AiErrorKind.invalidResponse, '请求失败（HTTP $status）$detail', statusCode: status);
+    } on FormatException {
+      if (status == 400 && !body.trimLeft().startsWith('<')) message = body;
+    }
+    if (message == null || message.trim().isEmpty) return '';
+    final cleaned = Log.redact(message).replaceAll(RegExp(r'\s+'), ' ').trim();
+    final chars = cleaned.runes.take(501).toList();
+    final shortened = chars.length <= 500 ? cleaned : '${String.fromCharCodes(chars.take(500))}…';
+    return '：$shortened';
   }
 }

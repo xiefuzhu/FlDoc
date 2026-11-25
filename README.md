@@ -26,6 +26,8 @@ flDoc 是一款支持离线阅读、全文与符号检索以及本地 RAG 问答
   或在「系统设置 → 隐私与安全性」中点击允许打开。
 - **Android**：仅支持 `arm64-v8a`（ARMv8 64 位）设备，不再打包 `armeabi-v7a` 与 `x86_64` 以显著缩小 APK 体积。CI 构建的 APK 使用调试密钥签名，不同构建之间覆盖安装若出现签名冲突，请先卸载旧版再安装。
 
+[跨平台交互预览](doc/platform-preview.html) · [界面预览图](doc/platform-preview.png) · [Android 模拟器截图](doc/android-emulator-preview.png)
+
 ## 核心特性
 
 - **双形态离线文档库**
@@ -162,8 +164,8 @@ flutter test --no-pub
 # 构建 Windows Release（CMake 会自动将 third_party/ripgrep/rg.exe 复制到 exe 同目录）
 flutter build windows --release
 
-# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.6.exe）
-iscc /DAppVersion=0.1.6 installer\flDoc.iss
+# 使用 Inno Setup 6 生成安装包（输出至 build/installer/flDoc-Setup-0.1.7.exe）
+iscc /DAppVersion=0.1.7 installer\flDoc.iss
 ```
 
 ### macOS（拆分 `arm64` 与 `x86_64`）

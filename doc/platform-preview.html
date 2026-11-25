@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>flDoc · macOS 与 Android 界面预览</title>
+  <style>
+    :root { color-scheme:light; --ink:#172031; --muted:#596579; --blue:#3c5dad; --green:#07685a; --line:#e1e7f0; font-family:system-ui,"Microsoft YaHei",sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#edf1f7; color:var(--ink); }
+    button,input { font:inherit; }
+    button { color:inherit; cursor:pointer; }
+    button:focus-visible,input:focus-visible { outline:2px solid #5778ca; outline-offset:3px; }
+    button { -webkit-tap-highlight-color:transparent; }
+    [hidden] { display:none!important; }
+    .site { max-width:1570px; padding:34px clamp(18px,4vw,64px) 42px; margin:auto; }
+    .intro { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:28px; }
+    .intro h1 { font-size:clamp(26px,3.2vw,44px); letter-spacing:-.055em; line-height:1.1; margin:0; }
+    .intro h1 span { color:var(--blue); margin-right:.22em; }
+    .intro p { margin:8px 0 0; font-size:13px; color:var(--muted); }
+    .stage { display:grid; grid-template-columns:minmax(0,1fr) minmax(315px,365px); align-items:start; gap:clamp(20px,3.4vw,52px); }
+    figure { margin:0; min-width:0; }
+    figcaption { display:flex; justify-content:space-between; align-items:baseline; column-gap:10px; margin:0 1px 9px; font-size:14px; font-weight:700; }
+    figcaption span { font-weight:400; font-size:11px; color:var(--muted); }
+    .mac { position:relative; height:655px; display:flex; flex-direction:column; isolation:isolate; overflow:hidden; background:white; border:1px solid #b9c4d4; border-radius:13px; box-shadow:0 16px 38px #2034481a,0 3px 10px #20344814; }
+    .chrome { display:flex; gap:7px; align-items:center; height:33px; padding-left:13px; background:#f4f6fa; }
+    .light { width:10px; height:10px; border-radius:50%; background:#ff6058; }
+    .light:nth-child(2) { background:#f5bb39; }
+    .light:nth-child(3) { background:#38c553; }
+    .toolbar { display:flex; align-items:center; gap:5px; min-height:47px; padding:4px 11px; border-bottom:1px solid var(--line); background:#f4f6fa; }
+    .icon { display:grid; place-items:center; min-width:34px; height:34px; border:0; border-radius:7px; background:transparent; font-size:18px; }
+    .icon:hover,.link:hover { background:#dfe6f2; }
+    .toolbar strong { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:0 7px; }
+    .spacer { flex:1; }
+    .search { margin-left:auto; display:flex; align-items:center; gap:8px; border:1px solid #dce3ee; background:#fff; border-radius:8px; padding:7px 9px; color:#435069; font-size:12px; white-space:nowrap; }
+    .search kbd { color:#5d6c84; margin-left:23px; }
+    .mac-main { display:flex; min-height:0; flex:1; }
+    .sidebar { display:flex; flex-direction:column; width:200px; flex-shrink:0; padding:10px; background:#eff3f9; border-right:1px solid var(--line); }
+    .sidebar .label { color:#566279; font-size:11px; font-weight:700; margin:18px 8px 5px; }
+    .link { text-align:left; width:100%; display:flex; gap:8px; align-items:center; padding:8px; min-height:32px; border:0; border-radius:6px; background:transparent; font-size:12px; }
+    .link .glyph { min-width:16px; text-align:center; }
+    .link[aria-current="page"] { background:#dce5f7; color:#2e4f98; font-weight:650; }
+    .frame-content { overflow:auto; flex:1; min-width:0; scrollbar-width:thin; scrollbar-color:#abb8ca transparent; }
+    article { width:min(100%,722px); padding:25px clamp(19px,3.2vw,43px) 38px; margin:auto; }
+    article h2 { margin:0 0 8px; font-size:clamp(27px,3vw,39px); line-height:1.16; letter-spacing:-.05em; }
+    .crumb { font-size:11px; color:#5b6780; margin:0 0 10px; }
+    .article-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:11px; color:var(--muted); border-bottom:1px solid var(--line); padding-bottom:14px; }
+    .chip { border:1px solid #d9e1ee; background:#f6f8fb; padding:5px 9px; font-size:11px; border-radius:7px; }
+    article h3 { margin:24px 0 9px; font-size:19px; letter-spacing:-.025em; }
+    article p,.callout { font-size:13px; line-height:1.8; }
+    article p { margin:0 0 12px; }
+    article code,.mono { font-family:"Cascadia Code",Consolas,monospace; }
+    article p code { font-size:.92em; background:#edf2fc; color:#3151a4; padding:2px 4px; border-radius:3px; }
+    .codebox { overflow:hidden; border:1px solid #e2e7f0; border-radius:8px; background:#f7f9fd; }
+    .codebox div { padding:8px 12px; font:11px "Cascadia Code",Consolas,monospace; color:#526581; border-bottom:1px solid #e2e7f0; }
+    pre { margin:0; overflow:auto; padding:12px; color:#2d4162; font:11px/1.75 "Cascadia Code",Consolas,monospace; tab-size:2; }
+    pre b { color:#6d3f98; font-weight:600; }
+    .callout { margin:15px 0 0; padding:10px 13px; border-left:3px solid #4d73c6; background:#eef3fc; color:#293e67; }
+    .shelf,.settings,.chat-preview { padding:24px; }
+    .shelf h2,.settings h2,.chat-preview h2 { margin:0; font-size:28px; letter-spacing:-.035em; }
+    .shelf p,.settings p,.chat-preview p { color:var(--muted); margin:5px 0 21px; font-size:13px; }
+    .book { display:flex; width:100%; align-items:center; gap:12px; padding:15px; margin-bottom:9px; border:1px solid var(--line); border-radius:9px; background:white; text-align:left; }
+    .book strong,.book small { display:block; }
+    .book small { color:var(--muted); margin-top:3px; }
+    .book-icon { flex:none; display:grid; place-items:center; width:36px; height:36px; background:#e7edfa; color:var(--blue); font-size:17px; border-radius:8px; }
+    .mac-search { position:absolute; z-index:2; inset:33px 0 0; padding:23px 10%; background:#202d4757; }
+    .panel { padding:13px; background:white; border:1px solid #e0e7f1; border-radius:11px; box-shadow:0 14px 40px #11244432; }
+    .panel label { display:block; font-size:12px; font-weight:700; margin:0 4px 8px; }
+    .query { display:block; width:100%; padding:11px 12px; font-size:13px; border:1px solid #cad7eb; border-radius:8px; background:#f8faff; }
+    .filters { display:flex; flex-wrap:wrap; gap:6px; padding:9px 0; }
+    .filters .active { background:#e0e9fa; color:#264786; }
+    .hits { min-height:82px; overflow:auto; }
+    .hits p { padding:7px; font-size:12px; color:var(--muted); margin:0; }
+    .hit { display:block; width:100%; text-align:left; border:0; border-bottom:1px solid var(--line); background:transparent; padding:11px 8px; font-size:13px; }
+    .hit:hover { background:#eef3fb; }
+    .hit small { display:block; margin-top:5px; color:var(--muted); text-wrap:pretty; }
+    mark { border-radius:2px; background:#feebaa; color:#362800; }
+    .phone { position:relative; isolation:isolate; overflow:hidden; height:655px; display:flex; flex-direction:column; border:5px solid #233531; border-radius:28px; background:#f5faf6; box-shadow:0 16px 36px #20344825; color:#18251f; }
+    .status { display:flex; align-items:center; justify-content:space-between; height:27px; padding:4px 16px 0; font-size:10px; font-weight:650; }
+    .camera { position:absolute; top:8px; left:calc(50% - 4px); width:8px; height:8px; border-radius:50%; background:#182420; }
+    .phone .toolbar { min-height:46px; border:0; background:#f5faf6; padding:4px 10px; }
+    .phone .toolbar strong { font-size:15px; }
+    .phone .icon { border-radius:50%; }
+    .phone .icon:hover { background:#def1e7; }
+    .phone .frame-content { min-height:0; }
+    .phone .shelf,.phone .settings,.phone .chat-preview { padding:15px 17px; }
+    .phone .book { border:0; border-radius:15px; background:#e6f0ea; }
+    .phone .book-icon { background:#d6eae0; color:var(--green); }
+    .phone article { padding:10px 17px 22px; }
+    .phone article h2 { font-size:30px; }
+    .phone article h3 { margin-top:18px; font-size:18px; }
+    .phone article p { font-size:13px; }
+    .phone article p code { background:#e1efe7; color:#135f51; }
+    .phone .codebox { background:#eef4ef; border-color:#d8e8de; }
+    .phone .codebox div { border-color:#d8e8de; }
+    .phone .callout { background:#e9f3ed; border-color:#4b9c84; color:#1b594a; }
+    .phone-nav { display:grid; grid-template-columns:repeat(3,1fr); padding:5px 5px 2px; background:#e7efe8; }
+    .phone-nav button { border:0; background:none; font-size:11px; padding:4px; }
+    .phone-nav button span { display:block; width:48px; border-radius:18px; padding:4px; margin:0 auto 3px; font-size:17px; }
+    .phone-nav button[aria-current] span { background:#c8e8db; color:#104c3e; }
+    .gesture-area { display:grid; place-items:center; height:19px; background:#e7efe8; }
+    .gesture { width:90px; height:4px; border-radius:4px; background:#263a33; }
+    .phone-search { padding:3px 15px; }
+    .phone .query { border:0; background:#e5efe7; border-radius:22px; }
+    .phone .filters .active { background:#cce8da; color:#154a3c; }
+    .shade { position:absolute; inset:0; display:flex; align-items:end; background:#163e3457; }
+    .sheet { width:100%; min-height:47%; padding:8px 16px 19px; border-radius:22px 22px 0 0; background:#f5faf6; }
+    .sheet .toolbar { background:transparent; padding:0; }
+    .sheet .handle { height:4px; width:32px; background:#afc1b6; border-radius:6px; margin:2px auto 9px; }
+    .sheet .link { min-height:46px; font-size:14px; }
+    .sheet .link:hover { background:#e2eee6; }
+    .mobile-actions { margin-top:8px; }
+    @media(max-width:1020px) { .stage { grid-template-columns:1fr; } .android-figure { width:min(100%,365px); } }
+    @media(max-width:600px) {
+      .site { padding:23px 12px; } .intro { align-items:start; flex-direction:column; gap:0; }
+      .sidebar { width:118px; padding:6px; } .sidebar .label { margin-left:4px; }
+      .link { gap:4px; padding:6px 4px; } .search kbd,.toolbar .desktop-only { display:none; }
+      .toolbar strong { margin:0 2px; } .mac-search { padding-inline:6%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="site">
+    <header class="intro">
+      <div><h1><span>flDoc</span> 跨平台界面预览</h1><p>用仓库内的 Riverpod 示例文档体验阅读、目录和搜索。</p></div>
+    </header>
+    <div class="stage">
+      <figure class="mac-figure">
+        <figcaption>macOS <span>侧栏 · 工具栏 · 键盘搜索</span></figcaption>
+        <section class="mac" aria-label="macOS 交互预览">
+          <div class="chrome" aria-hidden="true"><i class="light"></i><i class="light"></i><i class="light"></i></div>
+          <div class="toolbar">
+            <button class="icon" data-action="sidebar" aria-label="显示或隐藏侧栏" aria-expanded="true">◫</button>
+            <button class="icon desktop-only" data-action="back" aria-label="后退">‹</button>
+            <button class="icon desktop-only" data-action="forward" aria-label="前进">›</button>
+            <strong data-title>Riverpod</strong><div class="spacer"></div>
+            <button class="search" data-action="search">⌕ <span>搜索文档</span><kbd>⌘K</kbd></button>
+            <button class="icon" data-action="chat" aria-label="打开问答">▤</button>
+          </div>
+          <div class="mac-main">
+            <nav class="sidebar" aria-label="文档侧栏">
+              <button class="link" data-action="library"><span class="glyph">▣</span>文档库</button>
+              <div class="label">本地文档库</div>
+              <button class="link" data-page="start"><span class="glyph">▱</span>Riverpod</button>
+              <button class="link" data-page="notes"><span class="glyph">▱</span>plain-notes</button>
+              <div class="label">章节目录</div>
+              <button class="link" data-page="start" data-chapter aria-current="page"><span class="glyph">≡</span>快速开始</button>
+              <button class="link" data-page="reading" data-chapter><span class="glyph">≡</span>读取 Provider</button>
+              <div class="spacer"></div>
+              <button class="link" data-action="settings"><span class="glyph">⚙</span>设置</button>
+            </nav>
+            <div class="frame-content" data-content></div>
+          </div>
+          <div class="mac-search" data-search hidden>
+            <div class="panel">
+              <label for="mac-query">全文搜索</label>
+              <input id="mac-query" class="query" type="search" placeholder="搜索文档正文、标题或代码">
+              <div class="filters"><button class="chip active" data-scope>全部库</button></div>
+              <div class="hits" data-hits aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+      </figure>
+      <figure class="android-figure">
+        <figcaption>Android <span>全宽阅读 · 底部目录</span></figcaption>
+        <section class="phone" aria-label="Android 交互预览">
+          <div class="status" aria-hidden="true"><span>9:41</span><span class="camera"></span><span>▮▮▮ &nbsp; ▰</span></div>
+          <div class="toolbar">
+            <button class="icon" data-action="back" aria-label="返回">‹</button>
+            <strong data-title>Riverpod</strong><div class="spacer"></div>
+            <button class="icon" data-action="outline" aria-label="章节目录">≡</button>
+            <button class="icon" data-action="search" aria-label="全文搜索">⌕</button>
+          </div>
+          <div class="frame-content" data-content></div>
+          <div class="phone-nav" data-nav hidden>
+            <button data-action="library"><span>▣</span>文档库</button>
+            <button data-action="search"><span>⌕</span>搜索</button>
+            <button data-action="chat"><span>▤</span>问答</button>
+          </div>
+          <div class="gesture-area" aria-hidden="true"><div class="gesture"></div></div>
+          <div class="shade" data-sheet hidden>
+            <section class="sheet" aria-label="章节目录">
+              <div class="handle"></div>
+              <div class="toolbar"><strong>章节目录</strong><div class="spacer"></div><button class="icon" data-action="dismiss" aria-label="关闭目录">×</button></div>
+              <button class="link" data-page="start"><span class="glyph">≡</span>快速开始</button>
+              <button class="link" data-page="reading"><span class="glyph">≡</span>读取 Provider</button>
+            </section>
+          </div>
+        </section>
+      </figure>
+    </div>
+  </main>
+  <script>
+    // The documents and code samples come from test/fixtures/libraries.
+    const pages = {
+      start: {
+        title:'快速开始', library:'Riverpod', heading:'安装依赖', enTitle:'Getting Started',
+        text:'在 Flutter 工程中使用 Riverpod 之前，需要先在 pubspec.yaml 中添加 flutter_riverpod 依赖，然后阅读《读取 Provider》了解核心用法。',
+        enText:'Add flutter_riverpod to pubspec.yaml and wrap the root widget in ProviderScope.',
+        code:"import 'package:flutter/material.dart';\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\n\nvoid main() {\n  runApp(const ProviderScope(child: MyApp()));\n}",
+        tip:'在根组件外包裹 ProviderScope 是必须的，它负责存储所有 Provider 的状态并支持测试时的 overrides。',
+        next:'功能清单与对比',
+      },
+      reading: {
+        title:'读取 Provider', library:'Riverpod', heading:'使用 ref.watch', enTitle:'Reading a Provider',
+        text:'在 ConsumerWidget 的 build 方法中使用 ref.watch 监听 Provider，当依赖值更新时会自动重建界面。',
+        enText:'Use ref.watch inside a ConsumerWidget to rebuild when a provider changes.',
+        code:"class CounterView extends ConsumerWidget {\n  @override\n  Widget build(BuildContext context, WidgetRef ref) {\n    final count = ref.watch(counterProvider);\n    return Text(count.toString());\n  }\n}",
+        tip:'不要在异步回调或 initState 中调用 ref.watch，请改用 ref.read 或 ref.listen。',
+        next:'ProviderScope 覆盖',
+      },
+      notes: {
+        title:'笔记首页', library:'plain-notes', heading:'示例代码', enTitle:'笔记首页',
+        text:'这是一个没有 manifest.json 的纯 Markdown 文档库，用于测试自然排序与一键生成 manifest。',
+        enText:'这是一个没有 manifest.json 的纯 Markdown 文档库。',
+        code:'void computeDelta(int a, int b) {\n  print(a + b);\n}',
+      },
+    };
+    const escapeText = text => text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+    const renderArticle = (page, original) => `<article>
+      <div class="crumb">${page.library} / ${page.library === 'Riverpod' ? '3.x' : 'Markdown'}</div>
+      <h2>${original ? page.enTitle : page.title}</h2>
+      <div class="article-tools"><span>${original ? 'English' : '简体中文'} · Markdown</span>${page.library === 'Riverpod' ? '<button class="chip" data-action="language">'+(original ? '译文' : '原文')+'</button>' : ''}</div>
+      <h3>${original ? (page === pages.start ? 'Installation' : 'Using ref.watch') : page.heading}</h3>
+      <p>${escapeText(original ? page.enText : page.text).replace(/(pubspec\.yaml|flutter_riverpod|ref\.watch|ConsumerWidget)/g,'<code>$1</code>')}</p>
+      <div class="codebox"><div>dart</div><pre><code>${escapeText(page.code).replace(/\b(import|void|const|class|final|return|extends)\b/g,'<b>$1</b>')}</code></pre></div>
+      ${page.tip && !original ? '<div class="callout">'+escapeText(page.tip)+'</div><h3>'+page.next+'</h3>' : ''}
+    </article>`;
+    const renderShelf = () => `<section class="shelf"><h2>文档库</h2><p>2 个本地文档库</p>
+      <button class="book" data-page="start"><span class="book-icon">▱</span><span><strong>Riverpod</strong><small>3.x · 快速开始与 Provider</small></span></button>
+      <button class="book" data-page="notes"><span class="book-icon">▱</span><span><strong>plain-notes</strong><small>Markdown · 3 页</small></span></button></section>`;
+    const makePreview = (frame, mobile) => {
+      const content = frame.querySelector('[data-content]');
+      const search = frame.querySelector('[data-search]');
+      const title = frame.querySelector('[data-title]');
+      const history = ['start'];
+      let index = 0, state = 'start', original = false, scope = 'all';
+      function render() {
+        const page = pages[state];
+        title.textContent = page?.library ?? ({library:'flDoc', search:'全文搜索', chat:'文档问答', settings:'设置'})[state];
+        content.innerHTML = page ? renderArticle(page, original) : ({
+          library:renderShelf(),
+          search:`<div class="phone-search"><input class="query" type="search" aria-label="全文搜索" placeholder="搜索文档正文、标题或代码"><div class="filters"><button class="chip active" data-scope>全部库</button></div><div class="hits" data-hits aria-live="polite"></div></div>`,
+          chat:'<section class="chat-preview"><h2>文档问答</h2><p>配置对话模型后，可以引用本地文档回答问题。</p><button class="chip" data-action="settings">打开设置</button></section>',
+          settings:`<section class="settings"><h2>设置</h2><p>全文搜索引擎</p><strong>${mobile ? '内置离线搜索' : 'ripgrep 15.2.0'}</strong></section>`,
+        })[state];
+        content.scrollTop = 0;
+        if (mobile) {
+          frame.querySelector('[data-action="outline"]').hidden = !page || page.library !== 'Riverpod';
+          frame.querySelector('.toolbar [data-action="search"]').hidden = !page;
+          const nav = frame.querySelector('[data-nav]');
+          nav.hidden = !!page || state === 'settings';
+          for (const button of nav.querySelectorAll('button')) {
+            if (button.dataset.action === state) button.setAttribute('aria-current','page');
+            else button.removeAttribute('aria-current');
+          }
+        } else {
+          for (const button of frame.querySelectorAll('[data-chapter]')) {
+            if (button.dataset.page === state) button.setAttribute('aria-current','page');
+            else button.removeAttribute('aria-current');
+          }
+        }
+      }
+      function go(next) {
+        if (next !== state) {
+          history.splice(++index, history.length, next);
+          state = next;
+          original = false;
+        }
+        if (search) search.hidden = true;
+        const sheet = frame.querySelector('[data-sheet]');
+        if (sheet) sheet.hidden = true;
+        render();
+      }
+      function move(offset) {
+        if (index + offset < 0 || index + offset >= history.length) {
+          if (mobile && pages[state]) go('library');
+          return;
+        }
+        index += offset;
+        state = history[index];
+        original = false;
+        render();
+      }
+      function updateHits(root) {
+        const query = root.querySelector('input').value.trim();
+        const hits = root.querySelector('[data-hits]');
+        const active = pages[history.slice(0, index + 1).reverse().find(item => pages[item])]?.library ?? 'Riverpod';
+        if (!query) {
+          hits.innerHTML = '<p>输入关键词搜索本地文档。</p>';
+          return;
+        }
+        const matches = Object.entries(pages).flatMap(([id, page]) => {
+          if (scope === 'current' && page.library !== active) return [];
+          const sample = [page.title, page.text, ...page.code.split('\n')].find(text => text.toLowerCase().includes(query.toLowerCase()));
+          if (!sample) return [];
+          const at = sample.toLowerCase().indexOf(query.toLowerCase());
+          const highlighted = escapeText(sample.slice(0,at)) + '<mark>' + escapeText(sample.slice(at, at+query.length)) + '</mark>' + escapeText(sample.slice(at+query.length));
+          return [`<button class="hit" data-page="${id}">${page.title}<small>${highlighted}</small></button>`];
+        });
+        hits.innerHTML = matches.join('') || '<p>没有匹配的文档。</p>';
+      }
+      function openSearch() {
+        if (mobile) go('search'); else search.hidden = false;
+        const region = search ?? content;
+        region.querySelector('[data-scope]').textContent = scope === 'all' ? '全部库' : '当前库';
+        updateHits(region);
+        region.querySelector('input').focus();
+      }
+      frame.addEventListener('input', event => {
+        if (event.target.matches('.query')) updateHits(search ?? content);
+      });
+      frame.addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (event.target === search) search.hidden = true;
+        if (!button) return;
+        if (button.dataset.page) { go(button.dataset.page); return; }
+        if (button.hasAttribute('data-scope')) {
+          scope = scope === 'all' ? 'current' : 'all';
+          button.textContent = scope === 'all' ? '全部库' : '当前库';
+          updateHits(search ?? content);
+        }
+        switch (button.dataset.action) {
+          case 'search': openSearch(); break;
+          case 'sidebar': {
+            const nav = frame.querySelector('.sidebar');
+            nav.hidden = !nav.hidden;
+            button.setAttribute('aria-expanded', String(!nav.hidden));
+            break;
+          }
+          case 'outline': frame.querySelector('[data-sheet]').hidden = false; break;
+          case 'dismiss': frame.querySelector('[data-sheet]').hidden = true; break;
+          case 'back': move(-1); break;
+          case 'forward': move(1); break;
+          case 'language': original = !original; render(); break;
+          case 'library': case 'settings': case 'chat': go(button.dataset.action); break;
+        }
+      });
+      if (!mobile) document.addEventListener('keydown', event => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+          event.preventDefault(); openSearch();
+        }
+        if (event.key === 'Escape') search.hidden = true;
+      });
+      render();
+    };
+    makePreview(document.querySelector('.mac'), false);
+    makePreview(document.querySelector('.phone'), true);
+  </script>
+</body>
+</html>

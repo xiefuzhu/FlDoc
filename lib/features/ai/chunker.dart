@@ -41,7 +41,7 @@ class DocChunk {
   final String anchor;
   final String breadcrumb;
 
-  /// Full text shown in previews and RAG context.
+  /// Chunk text shown in previews and RAG context.
   final String displayText;
 
   /// Cleaned & bounded text sent to the embedding API.
@@ -57,7 +57,6 @@ class DocChunk {
 class DocChunker {
   static const int maxChunkChars = 1500;
   static const int minChunkChars = 200;
-  static const int maxCodeEmbedChars = 3000;
 
   static final _mdImg = RegExp(r'!\[([^\]]*)\]\([^)]*\)');
   static final _mdLink = RegExp(r'\[([^\]]+)\]\([^)]*\)');
@@ -121,7 +120,7 @@ class DocChunker {
     }
     flushSection();
 
-    // 2. Split oversized sections (> 1500 chars) by block with 1-block overlap; never split code blocks.
+    // 2. Prefer Markdown block boundaries with one block of overlap.
     final rawPieces = <_RawPiece>[];
     for (final sec in sections) {
       final blockTexts = sec.blocks.map(_blockToText).toList();
@@ -182,49 +181,45 @@ class DocChunker {
       ));
     }
 
-    // 4. Materialize DocChunk with embedText (truncating huge code blocks > 3000 chars) & SHA-256 hash.
+    // 4. Split any remaining oversized text, including a single large Markdown block.
     final chunks = <DocChunk>[];
-    final usedAnchorSuffix = <String, int>{};
     for (final pc in merged) {
       final displayText = pc.texts.join('\n\n').trim();
       if (displayText.isEmpty) continue;
-      final embedBody = [
-        for (var k = 0; k < pc.blocks.length; k++)
-          _blockForEmbed(pc.blocks[k], pc.texts[k]),
-      ].join('\n\n');
-      final header = '$libName / $pageTitle / ${pc.breadcrumb}';
-      final embedText = '$header\n${cleanForEmbedding(embedBody)}';
-      final hash = sha256.convert(utf8.encode(embedText)).toString();
-
-      // Keep canonical anchor (unique index also includes content_hash).
-      final baseAnchor = pc.anchor;
-      usedAnchorSuffix[baseAnchor] = (usedAnchorSuffix[baseAnchor] ?? 0) + 1;
-
-      chunks.add(DocChunk(
-        libKey: libKey,
-        libName: libName,
-        versionId: versionId,
-        page: page,
-        pageTitle: pageTitle,
-        lang: lang,
-        anchor: baseAnchor,
-        breadcrumb: pc.breadcrumb,
-        displayText: displayText,
-        embedText: embedText,
-        contentHash: hash,
-        startLine: pc.blocks.first.startLine,
-        endLine: pc.blocks.last.endLine,
-      ));
+      final fullHeader = '$libName / $pageTitle / ${pc.breadcrumb}';
+      final header = fullHeader.substring(0, _safeEnd(fullHeader, maxChunkChars ~/ 3));
+      for (final text in _splitText(displayText, maxChunkChars - header.length - 1)) {
+        final cleaned = cleanForEmbedding(text);
+        final embedText = '$header\n$cleaned';
+        chunks.add(DocChunk(
+          libKey: libKey,
+          libName: libName,
+          versionId: versionId,
+          page: page,
+          pageTitle: pageTitle,
+          lang: lang,
+          anchor: pc.anchor,
+          breadcrumb: pc.breadcrumb,
+          displayText: text,
+          embedText: embedText,
+          contentHash: sha256.convert(utf8.encode(embedText)).toString(),
+          startLine: pc.blocks.first.startLine,
+          endLine: pc.blocks.last.endLine,
+        ));
+      }
     }
     return chunks;
   }
 
   /// Chunks all pages (both Chinese and original `.en.md` if present) of a library version.
-  static List<DocChunk> chunkVersion(Library lib, LibraryVersion version) {
+  static List<DocChunk> chunkVersion(Library lib, LibraryVersion version, {bool strict = false}) {
     final out = <DocChunk>[];
     for (final pg in version.orderedPages) {
       final zhAbs = version.absPath(pg);
-      if (!p.isWithin(version.absDir, zhAbs) || !File(zhAbs).existsSync()) continue;
+      if (!p.isWithin(version.absDir, zhAbs) || !File(zhAbs).existsSync()) {
+        if (strict) throw FileSystemException('无法读取文档库页面', pg);
+        continue;
+      }
       final pageTitle = version.titleOf(pg) ?? p.basenameWithoutExtension(pg);
       try {
         final zhText = File(zhAbs).readAsStringSync();
@@ -260,7 +255,9 @@ class DocChunker {
             ));
           }
         }
-      } catch (_) {}
+      } catch (_) {
+        if (strict) rethrow;
+      }
     }
     return out;
   }
@@ -273,11 +270,26 @@ class DocChunker {
     return b.plainText;
   }
 
-  static String _blockForEmbed(MdBlock b, String display) {
-    if (b.kind == BlockKind.code && display.length > maxCodeEmbedChars) {
-      return '${display.substring(0, maxCodeEmbedChars)}\n...';
+  static Iterable<String> _splitText(String text, int limit) sync* {
+    var start = 0;
+    while (start < text.length) {
+      var end = _safeEnd(text, start + limit);
+      if (end < text.length) {
+        final newline = text.lastIndexOf('\n', end - 1);
+        final midpoint = start + limit ~/ 2;
+        final boundary = newline >= midpoint ? newline : text.lastIndexOf(' ', end - 1);
+        if (boundary >= midpoint) end = boundary + 1;
+      }
+      final part = text.substring(start, end);
+      if (part.trim().isNotEmpty) yield part;
+      start = end;
     }
-    return display;
+  }
+
+  static int _safeEnd(String text, int end) {
+    if (end >= text.length) return text.length;
+    final next = text.codeUnitAt(end);
+    return next >= 0xDC00 && next <= 0xDFFF ? end - 1 : end;
   }
 }
 

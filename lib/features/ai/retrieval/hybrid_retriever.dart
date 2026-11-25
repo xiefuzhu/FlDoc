@@ -337,6 +337,7 @@ symbols：问题中涉及的 API/类/函数名，没有则为空数组。''';
 
     for (final entry in hitsByKw.entries) {
       final kw = entry.key;
+      final needle = kw.toLowerCase();
       for (final fh in entry.value) {
         final norm = p.normalize(fh.filePath);
         (Library, LibraryVersion, String, String)? mapped;
@@ -356,13 +357,18 @@ symbols：问题中涉及的 API/类/函数名，没有则为空数组。''';
         final chunks = chunksOfFile(norm, mapped.$1, mapped.$2, mapped.$3, mapped.$4);
         if (chunks.isEmpty) continue;
         for (final m in fh.matches) {
-          DocChunk best = chunks.first;
+          DocChunk? best;
           for (final ch in chunks) {
             if (m.lineNumber >= ch.startLine && m.lineNumber <= ch.endLine) {
-              best = ch;
-              break;
+              best ??= ch;
+              // Fragments of one Markdown block share its source line range.
+              if (ch.displayText.toLowerCase().contains(needle)) {
+                best = ch;
+                break;
+              }
             }
           }
+          best ??= chunks.first;
           final key = best.identityKey;
           chunkObj[key] = best;
           (chunkKws[key] ??= <String>{}).add(kw);
