@@ -31,8 +31,9 @@ android {
 
     buildTypes {
         release {
-            // The CI preview APK uses the runner's debug key.
-            signingConfig = signingConfigs.getByName("debug")
+            // Publish jobs sign the unsigned APK in a separate CI step.
+            val unsigned = providers.environmentVariable("FLDOC_ANDROID_UNSIGNED").orNull == "true"
+            signingConfig = if (unsigned) null else signingConfigs.getByName("debug")
         }
     }
 }

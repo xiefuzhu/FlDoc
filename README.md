@@ -24,7 +24,10 @@ flDoc 是一款支持离线阅读、全文与符号检索以及本地 RAG 问答
   xattr -cr /Applications/flDoc.app
   ```
   或在「系统设置 → 隐私与安全性」中点击允许打开。
-- **Android**：仅支持 `arm64-v8a`（ARMv8 64 位）设备，不再打包 `armeabi-v7a` 与 `x86_64` 以显著缩小 APK 体积。CI 构建的 APK 使用调试密钥签名，不同构建之间覆盖安装若出现签名冲突，请先卸载旧版再安装。
+- **Android**：支持 `arm64-v8a`（ARMv8 64 位）设备。由临时调试密钥签名的旧版需要一次性迁移到使用正式发布密钥签名的版本。
+  - 卸载旧版前，把每个文档库用「导出资料包」保存到下载目录、电脑等独立位置，并确认备份能打开。没有导出入口的版本可以复制原始 Markdown 文档库目录及其资源与清单。
+  - 卸载会移除应用私有数据及应用专属目录中的导入副本。资料包保存文档库，应用设置、AI 密钥和聊天记录需单独处理。
+  - 安装正式签名版后，从「导入资料包」恢复文档库。后续版本沿用同一发布密钥，支持直接覆盖更新。
 
 [跨平台交互预览](doc/platform-preview.html) · [界面预览图](doc/platform-preview.png) · [Android 模拟器截图](doc/android-emulator-preview.png)
 
@@ -198,7 +201,7 @@ flutter build apk --release --target-platform android-arm64
 
 - **持续集成**：推送到 `main`、向 `main` 发起 PR 或手动触发 `Build and Release` 时，会自动执行：
   1. Windows x64：版本校验、`flutter analyze`、`flutter test`、Release 构建与 Inno Setup 打包。
-  2. Android `arm64-v8a`：单 ABI Release APK 构建，并校验 APK 内 `lib/` 仅包含 `arm64-v8a`。
+  2. Android `arm64-v8a`：构建并校验单 ABI APK。分支与 PR 构建使用调试签名，标签发布使用固定发布密钥。
   3. macOS `arm64` 与 `x86_64`：矩阵并行构建两个独立单架构包，校验包内全部 Mach-O 二进制为目标单架构并通过 `codesign --verify --deep --strict`。
 - **Tag 自动发布**：发版前同步更新以下版本信息，提交并推送 `vX.Y.Z` 标签（标签须与 `pubspec.yaml` 中 `+` 前版本号一致）：
   - [`pubspec.yaml`](pubspec.yaml)（`version: X.Y.Z+BUILD`）
@@ -207,6 +210,20 @@ flutter build apk --release --target-platform android-arm64
   - [`README.md`](README.md)（如构建示例版本需同步）
 
   全部构建任务通过后，工作流会自动创建对应的 GitHub Release，附带 Windows 安装包、macOS `arm64` / `x86_64` ZIP、Android `arm64-v8a` APK 以及合并后的 `SHA256SUMS.txt`。
+
+### Android 正式签名
+
+首次发布前生成并备份一份专用的发布 keystore。在 GitHub 仓库的「Settings → Secrets and variables → Actions」配置以下值。
+
+| 类型 | 名称 | 内容 |
+|---|---|---|
+| Secret | `FLDOC_ANDROID_KEYSTORE_BASE64` | keystore 文件的 Base64 编码 |
+| Secret | `FLDOC_ANDROID_STORE_PASSWORD` | keystore 密码 |
+| Secret | `FLDOC_ANDROID_KEY_ALIAS` | 发布密钥别名 |
+| Secret | `FLDOC_ANDROID_KEY_PASSWORD` | 发布密钥密码 |
+| Variable | `FLDOC_ANDROID_CERT_SHA256` | `keytool -list -v -keystore <keystore> -alias <alias>` 显示的证书 SHA-256 指纹 |
+
+推送版本标签时，CI 构建未签名 APK，再用发布密钥签名并核对证书指纹。缺少配置或验证失败会阻止发布。后续版本使用同一发布密钥，并递增 `pubspec.yaml` 中 `+` 后的构建号（Android `versionCode`）。
 
 ## 项目结构
 

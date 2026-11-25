@@ -115,6 +115,8 @@ jobs:
         run: flutter pub get --enforce-lockfile
 
       - name: Build Android release APK (arm64-v8a)
+        env:
+          FLDOC_ANDROID_UNSIGNED: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'true' || 'false' }}
         run: flutter build apk --release --target-platform android-arm64 --no-pub
 
       - name: Verify Android APK architecture
@@ -126,6 +128,48 @@ jobs:
           echo "Android APK ABIs: $abis"
           if [ "$abis" != "arm64-v8a" ]; then
             echo "Expected only arm64-v8a in APK, got: $abis" >&2
+            exit 1
+          fi
+
+      - name: Sign and verify the Android release APK
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          FLDOC_ANDROID_KEYSTORE_BASE64: ${{ secrets.FLDOC_ANDROID_KEYSTORE_BASE64 }}
+          FLDOC_ANDROID_STORE_PASSWORD: ${{ secrets.FLDOC_ANDROID_STORE_PASSWORD }}
+          FLDOC_ANDROID_KEY_ALIAS: ${{ secrets.FLDOC_ANDROID_KEY_ALIAS }}
+          FLDOC_ANDROID_KEY_PASSWORD: ${{ secrets.FLDOC_ANDROID_KEY_PASSWORD }}
+          FLDOC_ANDROID_CERT_SHA256: ${{ vars.FLDOC_ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          : "${FLDOC_ANDROID_KEYSTORE_BASE64:?Set the release keystore secret}"
+          : "${FLDOC_ANDROID_STORE_PASSWORD:?Set the release keystore password secret}"
+          : "${FLDOC_ANDROID_KEY_ALIAS:?Set the release key alias secret}"
+          : "${FLDOC_ANDROID_KEY_PASSWORD:?Set the release key password secret}"
+          expected=${FLDOC_ANDROID_CERT_SHA256//:/}
+          expected=${expected,,}
+          if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+            echo 'Set FLDOC_ANDROID_CERT_SHA256 to the release certificate SHA-256 fingerprint' >&2
+            exit 1
+          fi
+
+          sdk_root=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK not found}}
+          apksigner=$(find "$sdk_root/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)
+          if [[ ! -x "$apksigner" ]]; then
+            echo 'Android SDK Build Tools apksigner not found' >&2
+            exit 1
+          fi
+          umask 077
+          keystore=$(mktemp "$RUNNER_TEMP/fldoc-android-release.XXXXXXXX")
+          trap 'rm -f -- "$keystore"' EXIT
+          printf '%s' "$FLDOC_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          "$apksigner" sign --ks "$keystore" --ks-key-alias "$FLDOC_ANDROID_KEY_ALIAS" \
+            --ks-pass env:FLDOC_ANDROID_STORE_PASSWORD --key-pass env:FLDOC_ANDROID_KEY_PASSWORD "$apk"
+          actual=$("$apksigner" verify --print-certs "$apk" \
+            | awk '/certificate SHA-256 digest:/ { sub(/\r$/, "", $NF); print tolower($NF) }' | sort -u)
+          if [[ "$actual" != "$expected" ]]; then
+            echo 'The Android APK signer does not match FLDOC_ANDROID_CERT_SHA256' >&2
             exit 1
           fi
 
